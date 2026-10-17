@@ -1,0 +1,75 @@
+---
+# Generate WireGuard keys once (kept on the host, mode 0600) and render the server and
+# client configs. Re-running never rotates keys unless wg_rotate_keys=true.
+- name: Install wireguard-tools
+  ansible.builtin.package:
+    name: wireguard-tools
+    state: present
+  become: true
+  tags: [packages]
+
+- name: Key directory
+  ansible.builtin.file:
+    path: /etc/bess-lab/wireguard
+    state: directory
+    mode: "0700"
+    owner: root
+  become: true
+
+- name: Generate private keys and pre-shared keys
+  ansible.builtin.shell: |
+    set -e
+    umask 077
+    d=/etc/bess-lab/wireguard
+    [ -s "$d/{{ item }}.key" ] && [ "{{ wg_rotate_keys | default(false) | bool }}" != "True" ] && exit 0
+    wg genkey > "$d/{{ item }}.key"
+    wg pubkey < "$d/{{ item }}.key" > "$d/{{ item }}.pub"
+    wg genpsk > "$d/{{ item }}.psk"
+    echo generated
+  args:
+    executable: /bin/bash
+  loop: "{{ ['fw'] + (vpn.peers | map(attribute='name') | list) }}"
+  register: wg_gen
+  changed_when: "'generated' in wg_gen.stdout"
+  become: true
+
+- name: Read keys
+  ansible.builtin.slurp:
+    src: "/etc/bess-lab/wireguard/{{ item.0 }}.{{ item.1 }}"
+  loop: "{{ (['fw'] + (vpn.peers | map(attribute='name') | list)) | product(['key', 'pub', 'psk']) | list }}"
+  register: wg_raw
+  no_log: true
+  become: true
+
+- name: Build key dictionary
+  ansible.builtin.set_fact:
+    wg_keys: >-
+      {{ wg_keys | default({}) | combine({item.item.0: {({'key': 'private', 'pub': 'public', 'psk': 'psk'})[item.item.1]:
+         (item.content | b64decode | trim)}}, recursive=true) }}
+  loop: "{{ wg_raw.results }}"
+  no_log: true
+
+- name: Server config directory (mounted read-only into the fw container)
+  ansible.builtin.file:
+    path: "{{ bess_install_dir }}/network/wireguard/server"
+    state: directory
+    mode: "0700"
+  become: true
+
+- name: Server config for the firewall container
+  ansible.builtin.template:
+    src: wg0.conf.j2
+    dest: "{{ bess_install_dir }}/network/wireguard/server/wg0.conf"
+    mode: "0600"
+  become: true
+  notify: Restart firewall container
+
+- name: Client configs (copy these to the engineer / viewer laptops, then delete)
+  ansible.builtin.template:
+    src: peer.conf.j2
+    dest: "/etc/bess-lab/wireguard/client-{{ peer.name }}.conf"
+    mode: "0600"
+  loop: "{{ vpn.peers }}"
+  loop_control:
+    loop_var: peer
+  become: true

@@ -1,0 +1,64 @@
+profile,table,address,name,data_type,byte_order,scale,unit,access,description,enum
+pcs,input,0,heartbeat,uint16,AB,1,,R,Increments every second (watchdog),
+pcs,input,1,state,uint16,AB,1,,R,PCS operating state,0=STOPPED;1=STANDBY;2=CHARGING;3=DISCHARGING;4=FAULT
+pcs,input,2,fault_word,uint16,AB,1,,R,Active fault bitfield,b0=IGBT_OVERTEMP;b1=GRID_OVERVOLTAGE;b2=GRID_UNDERVOLTAGE;b3=GRID_FREQUENCY;b4=DC_OVERVOLTAGE;b5=INSULATION_FAULT;b6=BMS_COMMS_LOST;b7=EMERGENCY_STOP
+pcs,input,3,warning_word,uint16,AB,1,,R,Active warning bitfield,b0=POWER_DERATED;b1=HIGH_TEMPERATURE;b2=SETPOINT_CLAMPED
+pcs,input,4,active_power_kw,float32,ABCD,1,kW,R,AC active power (+ discharge / - charge),
+pcs,input,6,reactive_power_kvar,float32,ABCD,1,kvar,R,AC reactive power,
+pcs,input,8,ac_voltage_v,float32,ABCD,1,V,R,AC line-to-line voltage (LV side),
+pcs,input,10,ac_current_a,float32,ABCD,1,A,R,AC phase current,
+pcs,input,12,frequency_hz,uint16,AB,0.01,Hz,R,Grid frequency,
+pcs,input,13,dc_voltage_v,uint16,AB,0.1,V,R,DC link voltage,
+pcs,input,14,dc_current_a,int16,AB,0.1,A,R,DC current (+ discharge),
+pcs,input,15,igbt_temp_c,int16,AB,0.1,degC,R,IGBT module temperature,
+pcs,input,16,available_charge_kw,uint16,AB,1,kW,R,Charge power currently available,
+pcs,input,17,available_discharge_kw,uint16,AB,1,kW,R,Discharge power currently available,
+pcs,input,18,energy_charged_kwh,uint32,ABCD,1,kWh,R,Lifetime AC energy charged,
+pcs,input,20,energy_discharged_kwh,uint32,ABCD,1,kWh,R,Lifetime AC energy discharged,
+pcs,holding,0,run_command,uint16,AB,1,,RW,0=stop 1=run,0=STOP;1=RUN
+pcs,holding,1,p_setpoint_kw,int32,ABCD,0.1,kW,RW,Active power setpoint (+ discharge / - charge),
+pcs,holding,3,q_setpoint_kvar,int32,ABCD,0.1,kvar,RW,Reactive power setpoint,
+pcs,holding,5,fault_reset,uint16,AB,1,,RW,Write 1 to reset latched faults,
+pcs,holding,6,control_mode,uint16,AB,1,,RW,0=local 1=remote (SCADA),0=LOCAL;1=REMOTE
+pcs,holding,7,test_fault_inject,uint16,AB,1,,RW,FAT only: bits 0-7 OR-ed into fault_word; bit 14 freezes heartbeat,
+bms,input,0,heartbeat,uint16,AB,1,,R,Increments every second (watchdog),
+bms,input,1,status,uint16,AB,1,,R,BMS status,0=INIT;1=READY;2=CHARGING;3=DISCHARGING;4=FAULT
+bms,input,2,alarm_word,uint16,AB,1,,R,Active alarm bitfield,b0=CELL_OVERVOLTAGE;b1=CELL_UNDERVOLTAGE;b2=CELL_OVERTEMP;b3=CELL_UNDERTEMP;b4=CELL_IMBALANCE;b5=INSULATION_LOW;b6=CONTACTOR_FAULT;b7=FIRE_DETECTION
+bms,input,3,soc_pct,uint16,AB,0.1,%,R,State of charge,
+bms,input,4,soh_pct,uint16,AB,0.1,%,R,State of health,
+bms,input,5,pack_voltage_v,uint32,CDAB,0.01,V,R,DC pack voltage,
+bms,input,7,pack_current_a,int32,CDAB,0.01,A,R,DC pack current (+ discharge),
+bms,input,9,max_cell_voltage_v,uint16,AB,0.001,V,R,Highest cell voltage,
+bms,input,10,min_cell_voltage_v,uint16,AB,0.001,V,R,Lowest cell voltage,
+bms,input,11,max_cell_temp_c,int16,AB,0.1,degC,R,Highest cell temperature,
+bms,input,12,min_cell_temp_c,int16,AB,0.1,degC,R,Lowest cell temperature,
+bms,input,13,max_charge_power_kw,uint16,AB,1,kW,R,BMS charge power limit,
+bms,input,14,max_discharge_power_kw,uint16,AB,1,kW,R,BMS discharge power limit,
+bms,input,15,contactor_closed,uint16,AB,1,,R,Main DC contactor state,0=OPEN;1=CLOSED
+bms,input,16,cycle_count,uint16,AB,1,,R,Equivalent full cycles,
+bms,input,17,insulation_kohm,uint16,AB,1,kOhm,R,DC insulation resistance,
+bms,holding,0,contactor_command,uint16,AB,1,,RW,0=open 1=close,0=OPEN;1=CLOSE
+bms,holding,1,test_fault_inject,uint16,AB,1,,RW,FAT only: bits 0-7 OR-ed into alarm_word; bit 14 freezes heartbeat,
+hvac,input,0,heartbeat,uint16,AB,1,,R,Increments every second (watchdog),
+hvac,input,1,mode,uint16,AB,1,,R,HVAC operating mode,0=OFF;1=COOLING;2=HEATING;3=FAN_ONLY
+hvac,input,2,fault_word,uint16,AB,1,,R,Active fault bitfield,b0=COMPRESSOR_FAULT;b1=HIGH_PRESSURE;b2=LOW_PRESSURE;b3=FAN_FAULT;b4=SENSOR_FAULT
+hvac,input,3,container_temp_c,int16,AB,0.1,degC,R,Battery container air temperature,
+hvac,input,4,humidity_pct,uint16,AB,0.1,%,R,Container relative humidity,
+hvac,input,5,ambient_temp_c,int16,AB,0.1,degC,R,Outdoor ambient temperature,
+hvac,input,6,supply_air_temp_c,int16,AB,0.1,degC,R,Supply air temperature,
+hvac,input,7,compressor_on,uint16,AB,1,,R,Compressor running,0=OFF;1=ON
+hvac,input,8,power_kw,float32,DCBA,1,kW,R,HVAC electrical consumption (little-endian device),
+hvac,holding,0,enable,uint16,AB,1,,RW,0=disabled 1=enabled,0=DISABLED;1=ENABLED
+hvac,holding,1,cooling_setpoint_c,int16,AB,0.1,degC,RW,Cooling setpoint,
+hvac,holding,2,heating_setpoint_c,int16,AB,0.1,degC,RW,Heating setpoint,
+hvac,holding,3,test_fault_inject,uint16,AB,1,,RW,FAT only: bits 0-7 OR-ed into fault_word; bit 14 freezes heartbeat,
+meter,input,0,p_total_kw,float32,CDAB,1,kW,R,Total active power (POI: + export / AUX: + consumption),
+meter,input,2,q_total_kvar,float32,CDAB,1,kvar,R,Total reactive power,
+meter,input,4,s_total_kva,float32,CDAB,1,kVA,R,Total apparent power,
+meter,input,6,power_factor,float32,CDAB,1,,R,Power factor,
+meter,input,8,voltage_ll_v,float32,CDAB,1,V,R,Average line-to-line voltage,
+meter,input,10,current_avg_a,float32,CDAB,1,A,R,Average phase current,
+meter,input,12,frequency_hz,float32,CDAB,1,Hz,R,Frequency,
+meter,input,14,energy_import_kwh,uint32,CDAB,0.1,kWh,R,Imported energy counter,
+meter,input,16,energy_export_kwh,uint32,CDAB,0.1,kWh,R,Exported energy counter,
+meter,input,18,energy_check,float32,BADC,1,kWh,R,Byte-swapped copy of net energy (codec test point),

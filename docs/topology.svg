@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 800" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .band { stroke-width: 1.5; rx: 10; }
+      .host { fill: #ffffff; stroke: #64748b; stroke-width: 1.2; rx: 8; }
+      .t { fill: #0f172a; }
+      .s { fill: #475569; font-size: 11.5px; }
+      .h { font-weight: 600; font-size: 14px; fill: #0f172a; }
+      .zl { font-weight: 700; font-size: 12px; letter-spacing: .04em; }
+      .c { font-size: 11px; font-weight: 600; fill: #1e293b; }
+      .line { stroke: #334155; stroke-width: 1.8; fill: none; }
+    </style>
+  </defs>
+  <rect width="1100" height="800" fill="#f8fafc"/>
+  <text x="550" y="28" text-anchor="middle" font-size="18" font-weight="700" class="t">BESS site SCADA lab - network topology (zones and conduits, IEC 62443-3-2)</text>
+
+  <!-- firewall spine -->
+  <rect x="30" y="50" width="190" height="720" rx="12" fill="#1e293b"/>
+  <text x="125" y="80" text-anchor="middle" fill="#fff" font-weight="700" font-size="15">fw  (OT edge firewall)</text>
+  <text x="125" y="100" text-anchor="middle" fill="#cbd5e1" font-size="11.5">nftables default-drop · NAT</text>
+  <text x="125" y="116" text-anchor="middle" fill="#cbd5e1" font-size="11.5">WireGuard · rp-filter · NFLOG</text>
+  <g fill="#e2e8f0" font-size="11.5">
+    <text x="125" y="160" text-anchor="middle">wan  172.30.0.254</text>
+    <text x="125" y="176" text-anchor="middle">wg0  10.99.0.1</text>
+    <text x="125" y="300" text-anchor="middle">vlan30  10.10.30.254</text>
+    <text x="125" y="455" text-anchor="middle">vlan20  10.10.20.254</text>
+    <text x="125" y="640" text-anchor="middle">vlan10  10.10.10.254</text>
+  </g>
+
+  <!-- WAN band -->
+  <rect x="245" y="50" width="830" height="160" class="band" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="260" y="72" class="zl" fill="#475569">UPLINK / CORPORATE / INTERNET · 172.30.0.0/24 · lowest trust</text>
+  <rect x="265" y="90" width="235" height="100" class="host"/>
+  <text x="280" y="114" class="h">Engineer laptop</text>
+  <text x="280" y="134" class="s">WireGuard peer 10.99.0.10</text>
+  <text x="280" y="152" class="s">HMI, historian API, SSH to Level 2</text>
+  <text x="280" y="170" class="s">split tunnel, PSK + Curve25519</text>
+  <rect x="520" y="90" width="235" height="100" class="host"/>
+  <text x="535" y="114" class="h">Viewer (operator / client)</text>
+  <text x="535" y="134" class="s">WireGuard peer 10.99.0.20</text>
+  <text x="535" y="152" class="s">HMI only (tcp/3000)</text>
+  <rect x="775" y="90" width="280" height="100" class="host"/>
+  <text x="790" y="114" class="h">Browser on the Docker host</text>
+  <text x="790" y="134" class="s">http://localhost:3000</text>
+  <text x="790" y="152" class="s">published on fw, DNAT to the HMI</text>
+  <text x="790" y="170" class="s">no other inbound path exists</text>
+
+  <!-- DMZ band -->
+  <rect x="245" y="235" width="830" height="150" class="band" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="260" y="257" class="zl" fill="#1d4ed8">VLAN 30 · OT DMZ · PURDUE LEVEL 3.5 · 10.10.30.0/24</text>
+  <rect x="265" y="270" width="350" height="100" class="host"/>
+  <text x="280" y="294" class="h">Historian - InfluxDB 2.7</text>
+  <text x="280" y="314" class="s">10.10.30.10 : 8086 · bucket "bess", 30 d retention</text>
+  <text x="280" y="332" class="s">write-only token (gateway), read-only token (HMI)</text>
+  <text x="280" y="350" class="s">no default route - SNAT means it never needs one</text>
+  <rect x="640" y="270" width="415" height="100" class="host"/>
+  <text x="655" y="294" class="h">HMI - Grafana</text>
+  <text x="655" y="314" class="s">10.10.30.11 : 3000 · dashboards as code (provisioned)</text>
+  <text x="655" y="332" class="s">SoC, power flow, availability, alarms, comms health</text>
+  <text x="655" y="350" class="s">sign-up disabled, read-only datasource</text>
+
+  <!-- Control band -->
+  <rect x="245" y="410" width="830" height="135" class="band" fill="#f0fdf4" stroke="#4ade80"/>
+  <text x="260" y="432" class="zl" fill="#15803d">VLAN 20 · CONTROL · PURDUE LEVEL 2 · 10.10.20.0/24</text>
+  <rect x="265" y="445" width="790" height="85" class="host"/>
+  <text x="280" y="469" class="h">SCADA gateway (Python · pymodbus)   10.10.20.10</text>
+  <text x="280" y="489" class="s">block-read poller (8 requests / 73 points / 2 s) · decode by register map · comms + heartbeat watchdog</text>
+  <text x="280" y="507" class="s">alarm engine (46 alarms, deadband + on-delay) · SoC-window dispatch · supervised auto fault reset</text>
+  <text x="280" y="523" class="s">InfluxDB line protocol with store-and-forward buffer · automated FAT runner</text>
+
+  <!-- Field band -->
+  <rect x="245" y="570" width="830" height="200" class="band" fill="#fff7ed" stroke="#fb923c"/>
+  <text x="260" y="592" class="zl" fill="#c2410c">VLAN 10 · FIELD · PURDUE LEVEL 0-1 · 10.10.10.0/24 · Modbus TCP devices (simulated, one coupled physics model)</text>
+  <g>
+    <rect x="265" y="608" width="190" height="145" class="host"/>
+    <text x="280" y="632" class="h">PCS  10.10.10.11</text>
+    <text x="280" y="652" class="s">1 MW bidirectional inverter</text>
+    <text x="280" y="670" class="s">float32 ABCD · int32 setpoint</text>
+    <text x="280" y="688" class="s">latched faults, ramp limit</text>
+    <text x="280" y="706" class="s">FC04 measurements</text>
+    <text x="280" y="724" class="s">FC03/16 setpoints, commands</text>
+    <rect x="465" y="608" width="190" height="145" class="host"/>
+    <text x="480" y="632" class="h">BMS  10.10.10.12</text>
+    <text x="480" y="652" class="s">2 MWh LFP, 416 cells</text>
+    <text x="480" y="670" class="s">32-bit CDAB (word swap)</text>
+    <text x="480" y="688" class="s">SoC, cell V/T, limits</text>
+    <text x="480" y="706" class="s">contactor trip on critical</text>
+    <rect x="665" y="608" width="180" height="145" class="host"/>
+    <text x="680" y="632" class="h">HVAC  10.10.10.13</text>
+    <text x="680" y="652" class="s">container climate</text>
+    <text x="680" y="670" class="s">int16 x0.1, float32 DCBA</text>
+    <text x="680" y="688" class="s">compressor hysteresis</text>
+    <rect x="855" y="608" width="200" height="145" class="host"/>
+    <text x="870" y="632" class="h">Meters  10.10.10.14</text>
+    <text x="870" y="652" class="s">unit 1: POI (20 kV)</text>
+    <text x="870" y="670" class="s">unit 2: auxiliary (400 V)</text>
+    <text x="870" y="688" class="s">float32 CDAB, BADC test pt</text>
+    <text x="870" y="706" class="s">one IP, two unit IDs</text>
+  </g>
+
+  <!-- conduits -->
+  <path class="line" d="M220,520 L260,520" marker-start="arr"/>
+  <path class="line" d="M220,620 L240,620" marker-end="arr"/>
+  <path class="line" d="M220,330 L262,330" marker-end="arr"/>
+  <path class="line" d="M220,140 L262,140" marker-start="arr"/>
+  <g>
+    <rect x="904" y="388" width="170" height="20" rx="4" fill="#fff" stroke="#cbd5e1"/>
+    <text x="912" y="402" class="c">C2 gateway→historian :8086</text>
+    <rect x="904" y="548" width="170" height="20" rx="4" fill="#fff" stroke="#cbd5e1"/>
+    <text x="912" y="562" class="c">C1 gateway→devices :502</text>
+    <rect x="884" y="213" width="190" height="20" rx="4" fill="#fff" stroke="#cbd5e1"/>
+    <text x="892" y="227" class="c">C3/C4 VPN, DNAT→HMI :3000</text>
+  </g>
+  <text x="550" y="790" text-anchor="middle" class="s">Everything not listed as a conduit is dropped and logged. Field and DMZ hosts can never open connections towards higher-trust zones.</text>
+</svg>

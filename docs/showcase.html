@@ -1,0 +1,421 @@
+<title>BESS SCADA Lab</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an ISA-101 style HMI sheet - quiet greys everywhere, colour reserved for process state and alarms.
+   Single column of "panels" like an operator overview, data in mono. */
+:root {
+  --bg: #e6e8ea;          /* HMI grey ground */
+  --panel: #f4f5f6;
+  --panel-2: #dcdfe2;
+  --line: #c3c8cd;
+  --fg: #1d2329;
+  --muted: #5b646d;
+  --accent: #2f5d86;      /* process blue: links, normal flow */
+  --ok: #2f7d4a;
+  --warn: #b7791f;
+  --alarm: #c2362f;
+  --charge: #2f7d4a;
+  --discharge: #b8691e;
+  --sheet: #f8fafc;
+  --f-display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  --f-body: "Public Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #15191d; --panel: #1d2227; --panel-2: #262c32; --line: #343b42; --fg: #dde2e6; --muted: #929ca5;
+  --accent: #7fb0dc; --ok: #5cb87a; --warn: #e0a64a; --alarm: #f0675f; --charge: #5cb87a; --discharge: #e39a4f;
+  --sheet: #f3f5f7; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #15191d; --panel: #1d2227; --panel-2: #262c32; --line: #343b42; --fg: #dde2e6; --muted: #929ca5;
+  --accent: #7fb0dc; --ok: #5cb87a; --warn: #e0a64a; --alarm: #f0675f; --charge: #5cb87a; --discharge: #e39a4f;
+  --sheet: #f3f5f7; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 28px 56px; display: grid; gap: 28px }
+h1, h2, h3 { font-family: var(--f-display); text-wrap: balance; margin: 0; letter-spacing: .01em }
+h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.05; font-weight: 700 }
+h2 { font-size: 24px; font-weight: 600 }
+h3 { font-size: 17px; font-weight: 600 }
+p { margin: 0; max-width: 68ch }
+a { color: var(--accent) }
+.mono, code, td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums }
+code { font-size: .88em; background: var(--panel-2); padding: 1px 5px; border-radius: 3px }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+
+header { display: grid; gap: 14px; padding-bottom: 6px; border-bottom: 2px solid var(--fg) }
+.lede { font-size: 17px; color: var(--fg) }
+.stack { display: flex; flex-wrap: wrap; gap: 6px }
+.stack span { font-family: var(--f-mono); font-size: 12px; border: 1px solid var(--line); background: var(--panel); padding: 2px 8px; border-radius: 3px }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line) }
+.facts div { background: var(--panel); padding: 10px 12px; display: grid; gap: 2px }
+.facts b { font-family: var(--f-mono); font-size: 20px; font-weight: 500 }
+.facts small { color: var(--muted); font-size: 12.5px }
+
+section { display: grid; gap: 14px }
+.sec-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 16px; min-width: 0 }
+
+/* HMI replay */
+.hmi { display: grid; grid-template-columns: 260px 1fr; gap: 14px }
+@media (max-width: 820px) { .hmi { grid-template-columns: 1fr } }
+.side { display: grid; gap: 10px; align-content: start }
+.tag { display: grid; gap: 2px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px }
+.tag .lbl { font-size: 12px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase }
+.tag .val { font-family: var(--f-mono); font-size: 24px; font-variant-numeric: tabular-nums }
+.tag .val small { font-size: 13px; color: var(--muted) }
+.socbar { height: 12px; background: var(--panel-2); border: 1px solid var(--line); position: relative; margin-top: 4px }
+.socbar i { position: absolute; inset: 0 auto 0 0; background: var(--muted) }
+.socbar u { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--fg); opacity: .5 }
+.state { display: inline-flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 16px }
+.state::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--sc, var(--muted)) }
+.main { display: grid; gap: 10px; min-width: 0 }
+.chart { width: 100%; height: auto; display: block }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap }
+button { font: 600 13px var(--f-body); background: var(--fg); color: var(--bg); border: 0; border-radius: 3px; padding: 6px 12px; cursor: pointer }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+input[type=range] { flex: 1; min-width: 160px; accent-color: var(--accent) }
+.clock { font-family: var(--f-mono); font-size: 13px; color: var(--muted); min-width: 120px }
+.journal { font-family: var(--f-mono); font-size: 12.5px; display: grid; gap: 2px; max-height: 150px; overflow: auto }
+.journal div { display: grid; grid-template-columns: 64px 70px 70px 1fr; gap: 8px; padding: 3px 6px; border-left: 3px solid transparent }
+.journal .RAISED { border-color: var(--alarm); background: color-mix(in srgb, var(--alarm) 10%, transparent) }
+.journal .CLEARED { border-color: var(--ok); color: var(--muted) }
+.journal .empty { color: var(--muted); grid-template-columns: 1fr }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted) }
+.legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--c) }
+
+figure { margin: 0; display: grid; gap: 8px }
+.sheet { background: var(--sheet); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; padding: 8px }
+.sheet svg { display: block; min-width: 760px; width: 100%; height: auto }
+figcaption { font-size: 13px; color: var(--muted) }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: var(--panel) }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font-family: var(--f-mono); font-weight: 500; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--panel-2) }
+tr:last-child td { border-bottom: 0 }
+.pass { color: var(--ok); font-family: var(--f-mono); font-weight: 500 }
+.skip { color: var(--muted); font-family: var(--f-mono) }
+.order { font-family: var(--f-mono); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; white-space: nowrap }
+ul.plain { margin: 0; padding-left: 18px; display: grid; gap: 6px }
+footer { border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); font-size: 13px }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">Project · OT / SCADA engineering · built end to end on Linux</div>
+  <h1>BESS Site SCADA &amp; Data Acquisition Lab</h1>
+  <p class="lede">A working SCADA system for a simulated 1&nbsp;MW / 2&nbsp;MWh battery storage site: Modbus TCP field devices built from a protocol mapping table, a Python gateway polling them into an InfluxDB historian, Grafana dashboards, and a segmented OT network behind an nftables firewall with WireGuard remote access. Deployed with Ansible and delivered with the commissioning paperwork a real project needs.</p>
+  <div class="stack"><span>Linux</span><span>Python · asyncio</span><span>pymodbus</span><span>Modbus TCP</span><span>nftables</span><span>WireGuard</span><span>InfluxDB</span><span>Grafana</span><span>Docker</span><span>Ansible</span><span>IEC 62443</span></div>
+  <div class="facts">
+    <div><b>73</b><small>Modbus points in 8 requests / scan</small></div>
+    <div><b>4</b><small>32-bit byte orders handled</small></div>
+    <div><b>46</b><small>engineered alarms</small></div>
+    <div><b>5</b><small>firewall conduits, rest denied</small></div>
+    <div><b>86</b><small>automated tests passing</small></div>
+    <div><b>20/20</b><small>network policy checks passing</small></div>
+  </div>
+</header>
+
+<section aria-labelledby="h-hmi">
+  <div class="sec-head">
+    <h2 id="h-hmi">Site overview, replayed from the running system</h2>
+    <span class="eyebrow">recorded 4 min 28 s real · 4.5 h simulated · simulator at 60× speed</span>
+  </div>
+  <p>These values were recorded from the lab itself: the gateway polled the simulated devices every 2 seconds and wrote the results to its historian. Press play to replay the session. During it, a grid over-voltage fault was injected into the PCS (it trips to 0&nbsp;kW, the gateway auto-resets it after 30&nbsp;s) and the HVAC compressor was failed for 45&nbsp;s.</p>
+  <div class="hmi">
+    <div class="side">
+      <div class="tag"><span class="lbl">State of charge</span><span class="val" id="v-soc">–</span><div class="socbar"><i id="b-soc"></i><u style="left:20%"></u><u style="left:90%"></u></div></div>
+      <div class="tag"><span class="lbl">PCS state</span><span class="state" id="v-state">–</span></div>
+      <div class="tag"><span class="lbl">PCS active power</span><span class="val" id="v-p">–</span></div>
+      <div class="tag"><span class="lbl">Grid (POI) / auxiliary</span><span class="val" id="v-poi">–</span></div>
+      <div class="tag"><span class="lbl">Cell max / container</span><span class="val" id="v-t">–</span></div>
+      <div class="tag"><span class="lbl">Availability so far</span><span class="val" id="v-av">–</span></div>
+    </div>
+    <div class="main">
+      <div class="panel">
+        <div class="legend"><span style="--c:var(--accent)">SoC %</span><span style="--c:var(--discharge)">PCS power kW (+ discharge)</span><span style="--c:var(--alarm)">PCS fault</span></div>
+        <svg class="chart" id="chart" viewBox="0 0 720 300" role="img" aria-label="State of charge and PCS power over the recorded session"></svg>
+        <div class="controls">
+          <button id="play" type="button">Pause</button>
+          <input id="scrub" type="range" min="0" max="100" value="0" aria-label="Replay position">
+          <span class="clock" id="clock">t+00:00</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:8px">Alarm journal</h3>
+        <div class="journal" id="journal"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="h-net">
+  <div class="sec-head"><h2 id="h-net">Network: zones and conduits</h2><span class="eyebrow">IEC 62443-3-2 model</span></div>
+  <figure>
+    <div class="sheet"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 800" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .band { stroke-width: 1.5; rx: 10; }
+      .host { fill: #ffffff; stroke: #64748b; stroke-width: 1.2; rx: 8; }
+      .t { fill: #0f172a; }
+      .s { fill: #475569; font-size: 11.5px; }
+      .h { font-weight: 600; font-size: 14px; fill: #0f172a; }
+      .zl { font-weight: 700; font-size: 12px; letter-spacing: .04em; }
+      .c { font-size: 11px; font-weight: 600; fill: #1e293b; }
+      .line { stroke: #334155; stroke-width: 1.8; fill: none; }
+    </style>
+  </defs>
+  
+  <text x="550" y="28" text-anchor="middle" font-size="18" font-weight="700" class="t">BESS site SCADA lab - network topology (zones and conduits, IEC 62443-3-2)</text>
+
+  <!-- firewall spine -->
+  <rect x="30" y="50" width="190" height="720" rx="12" fill="#1e293b"/>
+  <text x="125" y="80" text-anchor="middle" fill="#fff" font-weight="700" font-size="15">fw  (OT edge firewall)</text>
+  <text x="125" y="100" text-anchor="middle" fill="#cbd5e1" font-size="11.5">nftables default-drop · NAT</text>
+  <text x="125" y="116" text-anchor="middle" fill="#cbd5e1" font-size="11.5">WireGuard · rp-filter · NFLOG</text>
+  <g fill="#e2e8f0" font-size="11.5">
+    <text x="125" y="160" text-anchor="middle">wan  172.30.0.254</text>
+    <text x="125" y="176" text-anchor="middle">wg0  10.99.0.1</text>
+    <text x="125" y="300" text-anchor="middle">vlan30  10.10.30.254</text>
+    <text x="125" y="455" text-anchor="middle">vlan20  10.10.20.254</text>
+    <text x="125" y="640" text-anchor="middle">vlan10  10.10.10.254</text>
+  </g>
+
+  <!-- WAN band -->
+  <rect x="245" y="50" width="830" height="160" class="band" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="260" y="72" class="zl" fill="#475569">UPLINK / CORPORATE / INTERNET · 172.30.0.0/24 · lowest trust</text>
+  <rect x="265" y="90" width="235" height="100" class="host"/>
+  <text x="280" y="114" class="h">Engineer laptop</text>
+  <text x="280" y="134" class="s">WireGuard peer 10.99.0.10</text>
+  <text x="280" y="152" class="s">HMI, historian API, SSH to Level 2</text>
+  <text x="280" y="170" class="s">split tunnel, PSK + Curve25519</text>
+  <rect x="520" y="90" width="235" height="100" class="host"/>
+  <text x="535" y="114" class="h">Viewer (operator / client)</text>
+  <text x="535" y="134" class="s">WireGuard peer 10.99.0.20</text>
+  <text x="535" y="152" class="s">HMI only (tcp/3000)</text>
+  <rect x="775" y="90" width="280" height="100" class="host"/>
+  <text x="790" y="114" class="h">Browser on the Docker host</text>
+  <text x="790" y="134" class="s">http://localhost:3000</text>
+  <text x="790" y="152" class="s">published on fw, DNAT to the HMI</text>
+  <text x="790" y="170" class="s">no other inbound path exists</text>
+
+  <!-- DMZ band -->
+  <rect x="245" y="235" width="830" height="150" class="band" fill="#eff6ff" stroke="#60a5fa"/>
+  <text x="260" y="257" class="zl" fill="#1d4ed8">VLAN 30 · OT DMZ · PURDUE LEVEL 3.5 · 10.10.30.0/24</text>
+  <rect x="265" y="270" width="350" height="100" class="host"/>
+  <text x="280" y="294" class="h">Historian - InfluxDB 2.7</text>
+  <text x="280" y="314" class="s">10.10.30.10 : 8086 · bucket "bess", 30 d retention</text>
+  <text x="280" y="332" class="s">write-only token (gateway), read-only token (HMI)</text>
+  <text x="280" y="350" class="s">no default route - SNAT means it never needs one</text>
+  <rect x="640" y="270" width="415" height="100" class="host"/>
+  <text x="655" y="294" class="h">HMI - Grafana</text>
+  <text x="655" y="314" class="s">10.10.30.11 : 3000 · dashboards as code (provisioned)</text>
+  <text x="655" y="332" class="s">SoC, power flow, availability, alarms, comms health</text>
+  <text x="655" y="350" class="s">sign-up disabled, read-only datasource</text>
+
+  <!-- Control band -->
+  <rect x="245" y="410" width="830" height="135" class="band" fill="#f0fdf4" stroke="#4ade80"/>
+  <text x="260" y="432" class="zl" fill="#15803d">VLAN 20 · CONTROL · PURDUE LEVEL 2 · 10.10.20.0/24</text>
+  <rect x="265" y="445" width="790" height="85" class="host"/>
+  <text x="280" y="469" class="h">SCADA gateway (Python · pymodbus)   10.10.20.10</text>
+  <text x="280" y="489" class="s">block-read poller (8 requests / 73 points / 2 s) · decode by register map · comms + heartbeat watchdog</text>
+  <text x="280" y="507" class="s">alarm engine (46 alarms, deadband + on-delay) · SoC-window dispatch · supervised auto fault reset</text>
+  <text x="280" y="523" class="s">InfluxDB line protocol with store-and-forward buffer · automated FAT runner</text>
+
+  <!-- Field band -->
+  <rect x="245" y="570" width="830" height="200" class="band" fill="#fff7ed" stroke="#fb923c"/>
+  <text x="260" y="592" class="zl" fill="#c2410c">VLAN 10 · FIELD · PURDUE LEVEL 0-1 · 10.10.10.0/24 · Modbus TCP devices (simulated, one coupled physics model)</text>
+  <g>
+    <rect x="265" y="608" width="190" height="145" class="host"/>
+    <text x="280" y="632" class="h">PCS  10.10.10.11</text>
+    <text x="280" y="652" class="s">1 MW bidirectional inverter</text>
+    <text x="280" y="670" class="s">float32 ABCD · int32 setpoint</text>
+    <text x="280" y="688" class="s">latched faults, ramp limit</text>
+    <text x="280" y="706" class="s">FC04 measurements</text>
+    <text x="280" y="724" class="s">FC03/16 setpoints, commands</text>
+    <rect x="465" y="608" width="190" height="145" class="host"/>
+    <text x="480" y="632" class="h">BMS  10.10.10.12</text>
+    <text x="480" y="652" class="s">2 MWh LFP, 416 cells</text>
+    <text x="480" y="670" class="s">32-bit CDAB (word swap)</text>
+    <text x="480" y="688" class="s">SoC, cell V/T, limits</text>
+    <text x="480" y="706" class="s">contactor trip on critical</text>
+    <rect x="665" y="608" width="180" height="145" class="host"/>
+    <text x="680" y="632" class="h">HVAC  10.10.10.13</text>
+    <text x="680" y="652" class="s">container climate</text>
+    <text x="680" y="670" class="s">int16 x0.1, float32 DCBA</text>
+    <text x="680" y="688" class="s">compressor hysteresis</text>
+    <rect x="855" y="608" width="200" height="145" class="host"/>
+    <text x="870" y="632" class="h">Meters  10.10.10.14</text>
+    <text x="870" y="652" class="s">unit 1: POI (20 kV)</text>
+    <text x="870" y="670" class="s">unit 2: auxiliary (400 V)</text>
+    <text x="870" y="688" class="s">float32 CDAB, BADC test pt</text>
+    <text x="870" y="706" class="s">one IP, two unit IDs</text>
+  </g>
+
+  <!-- conduits -->
+  <path class="line" d="M220,520 L260,520" marker-start="arr"/>
+  <path class="line" d="M220,620 L240,620" marker-end="arr"/>
+  <path class="line" d="M220,330 L262,330" marker-end="arr"/>
+  <path class="line" d="M220,140 L262,140" marker-start="arr"/>
+  <g>
+    <rect x="904" y="388" width="170" height="20" rx="4" fill="#fff" stroke="#cbd5e1"/>
+    <text x="912" y="402" class="c">C2 gateway→historian :8086</text>
+    <rect x="904" y="548" width="170" height="20" rx="4" fill="#fff" stroke="#cbd5e1"/>
+    <text x="912" y="562" class="c">C1 gateway→devices :502</text>
+    <rect x="884" y="213" width="190" height="20" rx="4" fill="#fff" stroke="#cbd5e1"/>
+    <text x="892" y="227" class="c">C3/C4 VPN, DNAT→HMI :3000</text>
+  </g>
+  <text x="550" y="790" text-anchor="middle" class="s">Everything not listed as a conduit is dropped and logged. Field and DMZ hosts can never open connections towards higher-trust zones.</text>
+</svg>
+</div>
+    <figcaption>Every zone is its own VLAN (a Docker bridge in the lab, 802.1Q sub-interfaces on real hardware). The only path between zones is the firewall. Lower-trust zones are source-NATed, so the historian has no route into OT even if compromised.</figcaption>
+  </figure>
+  <div class="tbl"><table>
+    <thead><tr><th>Conduit</th><th>From → to</th><th>Allowed</th><th>Control</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">C1</td><td>Gateway → field devices</td><td class="mono">tcp/502, icmp</td><td>Source IP pinned to the gateway, destination limited to the known device set</td></tr>
+      <tr><td class="mono">C2</td><td>Gateway → historian</td><td class="mono">tcp/8086</td><td>Write-only API token</td></tr>
+      <tr><td class="mono">C3</td><td>Uplink / VPN → HMI</td><td class="mono">tcp/3000</td><td>Single DNAT port forward, Grafana login, sign-up off</td></tr>
+      <tr><td class="mono">C4</td><td>Engineer VPN → historian</td><td class="mono">tcp/8086</td><td>WireGuard peer identity + read token</td></tr>
+      <tr><td class="mono">C5</td><td>Engineer VPN → control zone</td><td class="mono">tcp/22</td><td>WireGuard peer identity + SSH keys</td></tr>
+      <tr><td class="mono">–</td><td>Everything else</td><td class="mono">drop</td><td>Rate-limited logging, reverse-path anti-spoofing, no internet egress from OT</td></tr>
+    </tbody></table></div>
+</section>
+
+<section aria-labelledby="h-map">
+  <div class="sec-head"><h2 id="h-map">Protocol mapping table</h2><span class="eyebrow">excerpt of 73 points</span></div>
+  <p>One CSV drives the simulator, the gateway's read plan and decoder, the FAT runner, the commissioning CLI and the generated documentation. Each device uses a different vendor convention on purpose, because a word-swapped float still decodes to a plausible-looking number.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Ref</th><th>Device</th><th>Point</th><th>Type</th><th>Order</th><th>Scale</th><th>Unit</th></tr></thead>
+    <tbody><tr><td class="num">30002</td><td>PCS</td><td><code>state</code></td><td class="mono">uint16</td><td><span class="order">AB</span></td><td class="num">1</td><td></td></tr><tr><td class="num">30005</td><td>PCS</td><td><code>active_power_kw</code></td><td class="mono">float32</td><td><span class="order">ABCD</span></td><td class="num">1</td><td>kW</td></tr><tr><td class="num">40002</td><td>PCS</td><td><code>p_setpoint_kw</code></td><td class="mono">int32</td><td><span class="order">ABCD</span></td><td class="num">0.1</td><td>kW</td></tr><tr><td class="num">30013</td><td>PCS</td><td><code>frequency_hz</code></td><td class="mono">uint16</td><td><span class="order">AB</span></td><td class="num">0.01</td><td>Hz</td></tr><tr><td class="num">30004</td><td>BMS</td><td><code>soc_pct</code></td><td class="mono">uint16</td><td><span class="order">AB</span></td><td class="num">0.1</td><td>%</td></tr><tr><td class="num">30006</td><td>BMS</td><td><code>pack_voltage_v</code></td><td class="mono">uint32</td><td><span class="order">CDAB</span></td><td class="num">0.01</td><td>V</td></tr><tr><td class="num">30008</td><td>BMS</td><td><code>pack_current_a</code></td><td class="mono">int32</td><td><span class="order">CDAB</span></td><td class="num">0.01</td><td>A</td></tr><tr><td class="num">30003</td><td>BMS</td><td><code>alarm_word</code></td><td class="mono">uint16</td><td><span class="order">AB</span></td><td class="num">1</td><td></td></tr><tr><td class="num">30004</td><td>HVAC</td><td><code>container_temp_c</code></td><td class="mono">int16</td><td><span class="order">AB</span></td><td class="num">0.1</td><td>degC</td></tr><tr><td class="num">30009</td><td>HVAC</td><td><code>power_kw</code></td><td class="mono">float32</td><td><span class="order">DCBA</span></td><td class="num">1</td><td>kW</td></tr><tr><td class="num">30001</td><td>Meter</td><td><code>p_total_kw</code></td><td class="mono">float32</td><td><span class="order">CDAB</span></td><td class="num">1</td><td>kW</td></tr><tr><td class="num">30019</td><td>Meter</td><td><code>energy_check</code></td><td class="mono">float32</td><td><span class="order">BADC</span></td><td class="num">1</td><td>kWh</td></tr></tbody></table></div>
+</section>
+
+<section aria-labelledby="h-ver">
+  <div class="sec-head"><h2 id="h-ver">Verification</h2><span class="eyebrow">run on 17 Oct 2026</span></div>
+  <div class="grid2">
+    <div class="tbl"><table>
+      <thead><tr><th>Automated FAT</th><th>Result</th></tr></thead>
+      <tbody><tr><td><span class="mono">FAT-COM-01</span> Modbus communication pcs01</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-COM-02</span> Modbus communication bms01</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-COM-03</span> Modbus communication hvac01</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-COM-04</span> Modbus communication meter_poi</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-COM-05</span> Modbus communication meter_aux</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-COM-06</span> Unit-ID routing behind shared endpoint (meter_poi vs meter_aux)</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-DAT-01</span> Device heartbeats increment</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-DAT-02</span> Engineering-range plausibility</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-DAT-03</span> Scaling/word order: PCS DC voltage (uint16 x0.1) = BMS pack voltage (uint32 CDAB x0.01)</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-DAT-04</span> Byte-swapped float (BADC) decodes correctly</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-DAT-05</span> Site power balance PCS - AUX = POI + losses</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-CTL-01</span> Setpoint write / readback (HVAC cooling setpoint, int16 x0.1)</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-CTL-02</span> Write outside the map is rejected (exception response)</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-CTL-03</span> PCS active power follows SCADA setpoint</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-ALM-01</span> PCS fault trips to 0 kW, stays latched, reset recovers</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-ALM-02</span> BMS non-trip alarm (cell imbalance) raised and cleared</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-ALM-03</span> Heartbeat freeze detectable (watchdog input)</td><td class="pass">PASS</td></tr><tr><td><span class="mono">FAT-HIS-01</span> Historian receives telemetry (last 30 s)</td><td class="skip">SKIP <small>(needs the InfluxDB container)</small></td></tr><tr><td><span class="mono">FAT-HIS-02</span> Alarm journal contains the FAT-ALM-01 PCS fault event</td><td class="skip">SKIP <small>(needs the InfluxDB container)</small></td></tr></tbody></table></div>
+    <div class="tbl"><table>
+      <thead><tr><th>Network policy (Linux namespaces)</th><th>Result</th></tr></thead>
+      <tbody><tr><td>C1 gateway -&gt; PCS 10.10.10.11:502 (Modbus)</td><td class="pass">OPEN</td></tr><tr><td>C1 gateway -&gt; meters 10.10.10.14:502 (Modbus)</td><td class="pass">OPEN</td></tr><tr><td>C2 gateway -&gt; historian 10.10.30.10:8086</td><td class="pass">OPEN</td></tr><tr><td>C3 wan -&gt; fw:3000 DNAT -&gt; HMI</td><td class="pass">OPEN</td></tr><tr><td>gateway -&gt; PCS 10.10.10.11:22 (not Modbus)</td><td class="pass">FILTERED</td></tr><tr><td>gateway -&gt; unknown field host 10.10.10.50:502</td><td class="pass">FILTERED</td></tr><tr><td>gateway -&gt; HMI 10.10.30.11:3000 (not a conduit)</td><td class="pass">FILTERED</td></tr><tr><td>field -&gt; gateway 10.10.20.10:22 (upward)</td><td class="pass">FILTERED</td></tr><tr><td>field -&gt; historian 10.10.30.10:8086 (upward)</td><td class="pass">FILTERED</td></tr><tr><td>wan -&gt; PCS 10.10.10.11:502</td><td class="pass">FILTERED</td></tr><tr><td>wan -&gt; historian 10.10.30.10:8086</td><td class="pass">FILTERED</td></tr><tr><td>wan -&gt; gateway 10.10.20.10:22</td><td class="pass">FILTERED</td></tr><tr><td>wan -&gt; firewall SSH 172.30.0.254:22</td><td class="pass">FILTERED</td></tr><tr><td>historian -&gt; PCS 10.10.10.11:502</td><td class="pass">UNREACHABLE</td></tr><tr><td>spoofed field source from control zone</td><td class="pass">FILTERED</td></tr><tr><td>FW-SPOOF counter incremented</td><td class="pass">yes</td></tr><tr><td>historian received telemetry from gateway</td><td class="pass">yes</td></tr><tr><td>historian sees firewall SNAT address only</td><td class="pass">10.10.30.254</td></tr><tr><td>gateway polls all 5 devices through conduit C1</td><td class="pass">yes</td></tr><tr><td>denied flows counted by the default-drop rule</td><td class="pass">yes</td></tr></tbody></table></div>
+  </div>
+</section>
+
+<section aria-labelledby="h-del">
+  <h2 id="h-del">What the project delivers</h2>
+  <div class="grid2">
+    <div class="panel"><h3>Engineering</h3><ul class="plain">
+      <li>Coupled physics model: SoC with efficiency, LFP voltage curve, cell imbalance, thermal lags, HVAC hysteresis, transformer losses</li>
+      <li>Block-read poller with comms and heartbeat watchdogs, store-and-forward to the historian</li>
+      <li>Alarm engine with deadband, on-delay, bitfield expansion and severities; alarm journal and bad-actor list</li>
+      <li>SoC-window dispatch with interlocks and a supervised fault-reset limit (3 per hour)</li>
+    </ul></div>
+    <div class="panel"><h3>Infrastructure and security</h3><ul class="plain">
+      <li>VLAN/IP plan, routing, DNAT/SNAT, default-deny nftables rendered from one zone model</li>
+      <li>WireGuard with engineer and viewer roles, split tunnel</li>
+      <li>Host hardening mapped to IEC 62443-3-3: SSH, sysctl, auditd, journald, host firewall, unprivileged read-only containers, least-privilege tokens</li>
+      <li>Ansible roles: common, hardening, docker, stack, wireguard, backup</li>
+    </ul></div>
+    <div class="panel"><h3>Commissioning paperwork</h3><ul class="plain">
+      <li>FAT and SAT checklists with sign-off tables; automated FAT report</li>
+      <li>Topology diagram, IP plan, register map and alarm list generated from configuration</li>
+      <li>Backup and restore with SHA-256 manifests; configuration baseline with daily drift check</li>
+      <li>Operations runbook and troubleshooting guide</li>
+    </ul></div>
+  </div>
+</section>
+
+<footer>The field devices are simulated; the protocol, encoding, network and software are real and run on any Linux host with Docker. Security design follows IEC 62443 concepts and is not a certified implementation.</footer>
+</div>
+
+<script>
+const D = {"t":[0.0,2.0,4.0,6.0,8.0,10.0,12.0,14.0,16.0,18.0,20.0,22.0,24.0,26.0,28.0,30.0,32.0,34.0,36.0,38.0,40.0,42.0,44.0,46.0,48.0,50.0,52.0,54.0,56.0,58.0,60.0,62.0,64.0,66.0,68.0,70.0,72.0,74.0,76.0,78.0,80.0,82.0,84.0,86.0,88.0,90.0,92.0,94.0,96.0,98.0,100.0,102.0,104.0,106.0,108.0,110.0,112.0,114.0,116.0,118.0,120.0,122.0,124.0,126.0,128.0,130.0,132.0,134.0,136.0,138.0,140.0,142.0,144.0,146.0,148.0,150.0,152.0,154.0,156.0,158.0,160.0,162.0,164.0,166.0,168.0,170.0,172.0,174.0,176.0,178.0,180.0,182.0,184.0,186.0,188.0,190.0,192.0,194.0,196.0,198.0,200.0,202.0,204.0,206.0,208.0,210.0,212.0,214.0,216.0,218.0,220.0,222.0,224.0,226.0,228.0,230.0,232.0,234.0,236.0,238.0,240.0,242.0,244.0,246.0,248.0,250.0,252.0,254.0,256.0,258.0,260.0,262.0,264.0,266.0,268.0],"soc":[55.0,53.6,52.9,51.4,50.0,48.6,47.2,45.7,44.3,42.9,41.5,40.0,38.6,37.2,35.8,34.3,32.9,31.5,30.1,28.6,27.2,25.8,24.4,22.9,21.5,20.1,18.7,19.9,21.3,22.6,23.9,25.3,26.6,27.9,29.2,30.6,31.9,33.2,34.5,35.9,37.2,38.5,39.9,41.2,42.5,43.8,45.2,46.5,47.8,49.1,50.5,51.8,53.1,54.5,55.8,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,57.1,58.4,59.8,61.1,62.4,63.7,65.1,66.4,67.7,69.0,70.4,71.7,73.0,74.4,75.7,77.0,78.3,79.7,81.0,82.3,83.6,85.0,86.3,87.6,89.0,90.3,88.9,87.5,86.1,84.6,83.2,81.8,80.4,78.9,77.5,76.1,74.7,73.2,71.8,70.4,69.0,67.5,66.1,64.7,63.3,61.8,60.4,59.0,57.6,56.1,54.7,53.3,51.9,50.4,49.0,47.6,46.2,44.7,43.3,41.9,40.5,39.0,37.6],"p_pcs":[0.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,-800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0,800.0],"p_poi":[-9.661,783.913,783.767,783.938,784.378,783.863,784.061,770.484,770.477,769.645,770.344,770.54,769.925,769.781,769.951,783.859,784.095,783.973,784.398,784.003,784.259,770.051,769.761,770.072,770.393,769.458,770.277,-829.722,-829.755,-816.129,-815.792,-815.816,-815.716,-815.893,-829.885,-829.989,-829.734,-830.09,-829.904,-829.836,-830.087,-829.848,-815.937,-815.9,-815.98,-816.346,-815.956,-816.048,-829.845,-829.981,-829.908,-829.854,-829.875,-829.926,-829.822,-829.891,-9.05,-9.474,-9.315,-9.509,-9.299,-9.874,-9.365,-9.44,-9.615,-9.803,-9.536,-9.056,-9.903,-9.36,-9.741,-9.907,-9.3,-815.722,-816.021,-815.907,-815.491,-815.722,-815.717,-815.898,-829.676,-830.118,-829.848,-815.619,-815.846,-816.062,-815.963,-815.975,-815.909,-815.864,-815.864,-815.781,-815.789,-816.088,-815.985,-816.006,-816.208,-816.133,783.797,784.304,784.139,784.054,784.359,784.166,784.104,769.916,770.387,770.145,769.908,769.957,770.227,769.975,769.67,770.178,770.635,770.052,770.103,770.274,770.237,769.929,769.707,770.16,769.972,769.606,770.346,770.034,770.028,770.265,770.397,770.025,769.971,783.865,783.947,783.611,784.138],"p_aux":[7.661,7.687,7.833,7.662,7.222,7.737,7.539,21.116,21.123,21.955,21.256,21.06,21.675,21.819,21.649,7.741,7.505,7.627,7.202,7.597,7.341,21.549,21.839,21.528,21.207,22.142,21.323,21.322,21.355,7.729,7.392,7.416,7.316,7.493,21.485,21.589,21.334,21.69,21.504,21.436,21.687,21.448,7.537,7.5,7.58,7.946,7.555,7.648,21.445,21.581,21.508,21.454,21.475,21.526,21.422,21.491,7.05,7.474,7.315,7.509,7.299,7.874,7.365,7.44,7.615,7.803,7.536,7.056,7.903,7.36,7.741,7.907,7.3,7.322,7.621,7.507,7.091,7.322,7.317,7.498,21.276,21.718,21.448,7.219,7.446,7.662,7.563,7.575,7.509,7.464,7.464,7.381,7.389,7.688,7.585,7.606,7.808,7.733,7.803,7.296,7.461,7.546,7.241,7.434,7.496,21.684,21.213,21.455,21.692,21.643,21.373,21.625,21.93,21.422,20.964,21.548,21.497,21.326,21.363,21.671,21.893,21.44,21.628,21.994,21.254,21.566,21.572,21.335,21.203,21.575,21.629,7.735,7.653,7.989,7.462],"t_cell":[26.0,27.0,27.5,28.4,29.2,30.0,30.7,31.3,31.8,32.3,32.6,32.9,33.1,33.2,33.3,33.4,33.5,33.7,33.8,34.0,34.2,34.4,34.6,34.6,34.7,34.7,34.7,34.6,34.5,34.5,34.4,34.5,34.6,34.7,34.8,34.9,35.0,35.0,35.0,35.0,34.9,34.8,34.7,34.6,34.6,34.6,34.7,34.8,34.9,35.0,35.1,35.1,35.0,35.0,34.9,34.8,33.7,32.7,31.9,31.1,30.5,29.9,29.4,28.9,28.6,28.2,27.9,27.6,27.4,27.2,27.0,26.8,26.7,27.5,28.3,29.1,29.8,30.4,31.1,31.6,32.2,32.6,32.9,33.2,33.5,33.8,34.1,34.4,34.7,35.0,35.3,35.6,36.0,36.3,36.6,36.9,37.2,37.5,37.8,38.1,38.4,38.7,39.0,39.2,39.5,39.8,40.0,40.2,40.3,40.3,40.3,40.2,40.2,40.0,39.9,39.7,39.6,39.4,39.2,38.9,38.7,38.5,38.2,38.0,37.7,37.5,37.2,36.9,36.7,36.4,36.1,35.8,35.6,35.5,35.4],"t_cont":[24.0,24.4,24.5,24.9,25.2,25.6,26.0,25.8,25.5,25.3,25.0,24.8,24.6,24.3,24.1,24.2,24.6,24.9,25.3,25.6,26.0,25.8,25.5,25.3,25.0,24.8,24.5,24.3,24.0,24.3,24.7,25.0,25.4,25.7,26.0,25.7,25.4,25.2,24.9,24.7,24.4,24.2,24.1,24.4,24.8,25.1,25.5,25.8,25.9,25.6,25.4,25.1,24.8,24.6,24.3,24.1,24.0,24.0,23.9,23.9,23.9,23.9,23.8,23.8,23.8,23.8,23.7,23.7,23.7,23.7,23.6,23.6,23.6,23.9,24.3,24.6,25.0,25.3,25.6,26.0,25.8,25.5,25.2,25.6,25.9,26.2,26.5,26.8,27.2,27.5,27.8,28.1,28.4,28.7,29.0,29.3,29.6,29.9,30.2,30.4,30.7,31.0,31.3,31.6,31.8,31.8,31.5,31.1,30.8,30.5,30.2,29.9,29.5,29.2,28.9,28.6,28.3,28.0,27.7,27.4,27.1,26.8,26.5,26.2,25.9,25.6,25.3,25.0,24.8,24.5,24.2,24.1,24.4,24.7,25.0],"t_igbt":[30.0,51.9,57.0,62.1,64.2,65.2,65.8,66.1,66.0,65.8,65.6,65.4,65.1,64.9,64.7,64.5,64.7,65.0,65.3,65.6,66.0,66.1,66.0,65.8,65.6,65.4,65.1,64.4,64.4,64.5,64.7,65.0,65.4,65.7,66.1,66.1,66.0,65.8,65.5,65.3,65.0,64.8,64.6,64.6,64.8,65.1,65.5,65.8,66.1,66.1,65.9,65.7,65.4,65.2,64.9,64.7,42.7,34.6,31.7,30.6,30.1,30.0,29.9,29.8,29.8,29.8,29.8,29.7,29.7,29.7,29.7,29.6,29.6,51.5,59.7,63.0,64.4,65.1,65.6,65.9,66.1,66.0,65.8,65.8,66.0,66.2,66.6,66.9,67.2,67.5,67.8,68.1,68.4,68.7,69.0,69.3,69.6,69.9,69.8,70.3,70.7,71.0,71.3,71.6,71.9,72.1,72.0,71.8,71.5,71.2,70.9,70.5,70.2,69.9,69.6,69.3,69.0,68.7,68.3,68.0,67.7,67.4,67.1,66.8,66.6,66.3,66.0,65.7,65.4,65.1,64.8,64.6,64.6,64.8,65.1],"t_amb":[19.6,19.5,19.5,19.5,19.5,19.5,19.4,19.4,19.4,19.4,19.4,19.3,19.3,19.3,19.3,19.2,19.2,19.2,19.2,19.1,19.1,19.1,19.0,19.0,19.0,19.0,18.9,18.9,18.9,18.8,18.8,18.8,18.7,18.7,18.7,18.6,18.6,18.6,18.5,18.5,18.5,18.4,18.4,18.4,18.3,18.3,18.3,18.2,18.2,18.1,18.1,18.1,18.0,18.0,18.0,17.9,17.9,17.8,17.8,17.8,17.7,17.7,17.6,17.6,17.5,17.5,17.4,17.4,17.4,17.3,17.3,17.2,17.2,17.1,17.1,17.0,17.0,17.0,16.9,16.9,16.8,16.8,16.7,16.7,16.6,16.6,16.5,16.5,16.4,16.4,16.3,16.3,16.2,16.2,16.2,16.1,16.1,16.0,16.0,15.9,15.9,15.8,15.8,15.7,15.7,15.6,15.6,15.5,15.5,15.4,15.3,15.3,15.2,15.2,15.1,15.1,15.0,15.0,14.9,14.9,14.8,14.8,14.7,14.7,14.6,14.6,14.5,14.5,14.4,14.4,14.3,14.3,14.2,14.2,14.1],"v_max":[3.3,3.267,3.266,3.265,3.263,3.261,3.26,3.259,3.257,3.256,3.254,3.253,3.252,3.25,3.25,3.248,3.246,3.245,3.244,3.242,3.239,3.237,3.234,3.232,3.23,3.227,3.221,3.292,3.294,3.297,3.298,3.301,3.302,3.306,3.308,3.309,3.311,3.311,3.313,3.314,3.316,3.316,3.319,3.319,3.32,3.321,3.322,3.324,3.326,3.326,3.328,3.33,3.331,3.331,3.333,3.335,3.302,3.302,3.302,3.302,3.302,3.303,3.302,3.303,3.302,3.302,3.302,3.303,3.302,3.303,3.302,3.302,3.303,3.335,3.338,3.338,3.34,3.342,3.342,3.344,3.346,3.347,3.35,3.352,3.355,3.358,3.361,3.364,3.368,3.37,3.374,3.377,3.381,3.384,3.387,3.391,3.395,3.4,3.333,3.328,3.324,3.32,3.316,3.312,3.309,3.306,3.302,3.299,3.296,3.293,3.289,3.286,3.283,3.282,3.28,3.278,3.277,3.275,3.274,3.272,3.271,3.269,3.268,3.266,3.265,3.263,3.262,3.26,3.26,3.258,3.257,3.255,3.253,3.252,3.251],"v_min":[3.292,3.258,3.257,3.256,3.255,3.253,3.252,3.25,3.249,3.247,3.246,3.244,3.243,3.241,3.239,3.238,3.237,3.235,3.233,3.23,3.228,3.224,3.221,3.218,3.214,3.211,3.204,3.275,3.279,3.282,3.285,3.288,3.291,3.293,3.296,3.299,3.3,3.302,3.303,3.304,3.305,3.307,3.308,3.31,3.311,3.313,3.314,3.315,3.316,3.318,3.319,3.32,3.322,3.323,3.324,3.326,3.294,3.294,3.294,3.294,3.294,3.293,3.294,3.293,3.294,3.294,3.294,3.293,3.294,3.293,3.294,3.294,3.293,3.327,3.328,3.33,3.331,3.332,3.333,3.334,3.336,3.337,3.338,3.341,3.343,3.345,3.348,3.35,3.352,3.355,3.357,3.359,3.361,3.363,3.365,3.367,3.369,3.373,3.305,3.304,3.302,3.299,3.297,3.295,3.292,3.29,3.288,3.285,3.282,3.279,3.277,3.275,3.273,3.271,3.27,3.269,3.267,3.266,3.265,3.264,3.262,3.261,3.259,3.258,3.257,3.255,3.253,3.252,3.25,3.249,3.248,3.246,3.245,3.243,3.242],"state":[1.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,4.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,2.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0,3.0],"avail":[1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0],"lat_pcs":[2.4,3.7,1.9,2.0,1.6,1.6,1.6,1.5,2.0,1.4,1.6,1.8,1.6,1.6,1.6,1.7,1.9,1.9,1.9,1.9,1.6,1.7,2.0,4.0,1.5,1.7,2.1,1.9,3.1,3.7,2.8,1.9,1.8,2.0,1.6,1.5,1.9,2.0,1.9,1.5,1.5,3.6,1.5,2.0,1.7,1.9,2.3,1.8,1.9,3.7,1.8,1.5,1.7,2.0,2.0,2.5,1.7,1.4,1.9,1.5,1.7,1.4,1.4,1.5,1.6,1.8,1.4,2.5,1.5,1.5,1.7,1.5,1.8,1.9,1.8,1.7,1.9,1.4,1.7,1.4,1.6,1.6,1.5,1.9,1.5,1.4,5.6,1.4,1.5,1.5,1.6,1.5,1.7,1.6,2.1,1.6,1.4,1.7,1.5,1.6,1.4,1.5,1.9,1.3,1.5,1.5,1.4,2.1,1.8,1.4,1.6,1.6,1.7,1.6,1.7,1.5,1.4,1.9,1.5,1.6,1.9,1.7,1.7,2.8,1.5,1.5,1.9,1.6,1.7,1.7,1.5,1.5,1.5,2.0,1.5],"scan":[3.8,4.3,2.3,2.5,1.9,1.9,1.9,1.8,2.4,1.7,2.1,2.5,2.1,1.9,2.0,2.2,2.3,2.4,2.5,2.5,2.0,2.1,2.4,5.0,2.0,2.1,4.5,2.7,4.1,4.4,3.6,2.4,2.1,2.4,2.3,1.9,2.2,2.5,2.2,2.0,1.9,3.9,1.9,2.4,2.2,2.5,2.6,2.5,2.3,4.1,2.2,2.1,2.1,2.5,2.5,3.2,2.2,1.7,2.4,1.9,2.1,1.8,1.8,1.8,2.0,2.2,1.7,3.3,1.8,1.9,2.0,1.9,3.4,2.6,2.2,2.8,2.3,1.7,2.3,1.8,2.0,1.9,2.4,2.4,1.9,1.7,6.1,1.8,1.9,2.1,2.0,1.8,2.0,2.1,2.7,2.0,1.8,3.0,1.8,1.9,1.9,1.9,2.3,1.6,1.9,2.0,2.9,2.6,2.3,1.7,2.1,2.0,2.2,2.1,2.3,2.1,1.9,2.5,1.9,1.9,2.4,2.0,2.2,3.5,1.8,1.9,2.3,2.1,2.1,2.1,1.9,1.9,1.8,2.6,2.0],"events":[{"t":112.0,"device":"pcs01","id":"PCS_FAULT_GRID_OVERVOLTAGE","severity":"critical","state":"RAISED","message":"PCS fault: GRID_OVERVOLTAGE"},{"t":146.0,"device":"pcs01","id":"PCS_FAULT_GRID_OVERVOLTAGE","severity":"critical","state":"CLEARED","message":"PCS fault: GRID_OVERVOLTAGE"},{"t":168.0,"device":"hvac01","id":"HVAC_FAULT_COMPRESSOR_FAULT","severity":"major","state":"RAISED","message":"HVAC fault: COMPRESSOR_FAULT"},{"t":200.0,"device":"pcs01","id":"PCS_WARNING_HIGH_TEMPERATURE","severity":"warning","state":"RAISED","message":"PCS warning: HIGH_TEMPERATURE"},{"t":210.0,"device":"hvac01","id":"HVAC_FAULT_COMPRESSOR_FAULT","severity":"major","state":"CLEARED","message":"HVAC fault: COMPRESSOR_FAULT"},{"t":226.0,"device":"pcs01","id":"PCS_WARNING_HIGH_TEMPERATURE","severity":"warning","state":"CLEARED","message":"PCS warning: HIGH_TEMPERATURE"}]};
+const N = D.t.length;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const STATES = {0:["STOPPED","--muted"],1:["STANDBY","--accent"],2:["CHARGING","--charge"],3:["DISCHARGING","--discharge"],4:["FAULT","--alarm"]};
+const W = 720, H = 300, L = 44, R = 50, T = 12, B = 30;
+const x = i => L + (W - L - R) * (D.t[i] / D.t[N - 1]);
+const ySoc = v => T + (H - T - B) * (1 - v / 100);
+const pMax = 1000, yP = v => T + (H - T - B) * (1 - (v + pMax) / (2 * pMax));
+const fmtT = s => { const m = Math.floor(s * 60 / 60), sec = Math.round(s * 60 % 60); return `${String(Math.floor(s*60/3600)).padStart(1,"0")}h${String(Math.floor(s*60%3600/60)).padStart(2,"0")}`; };
+const svg = document.getElementById("chart");
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent = svg) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; }
+
+function drawStatic() {
+  svg.innerHTML = "";
+  const grid = css("--line"), muted = css("--muted");
+  for (const v of [0, 25, 50, 75, 100]) {
+    el("line", {x1: L, x2: W - R, y1: ySoc(v), y2: ySoc(v), stroke: grid, "stroke-width": 1});
+    el("text", {x: L - 6, y: ySoc(v) + 4, "text-anchor": "end", "font-size": 11, fill: muted, "font-family": "IBM Plex Mono, monospace"}).textContent = v + "%";
+  }
+  for (const v of [-1000, -500, 0, 500, 1000]) {
+    el("text", {x: W - R + 6, y: yP(v) + 4, "font-size": 11, fill: muted, "font-family": "IBM Plex Mono, monospace"}).textContent = (v > 0 ? "+" : "") + v;
+  }
+  el("text", {x: W - R + 6, y: H - 8, "font-size": 10, fill: muted}).textContent = "kW";
+  // fault bands
+  let start = null;
+  for (let i = 0; i <= N; i++) {
+    const f = i < N && D.state[i] === 4;
+    if (f && start === null) start = i;
+    if (!f && start !== null) { el("rect", {x: x(start), y: T, width: Math.max(3, x(i - 1) - x(start)), height: H - T - B, fill: css("--alarm"), opacity: .18}); start = null; }
+  }
+  // sim-time axis labels (seconds of real time * 60 = sim seconds)
+  const simH = D.t[N - 1] * 60 / 3600;
+  for (let h = 0; h <= simH; h += 1) {
+    const xx = L + (W - L - R) * (h * 3600 / 60) / D.t[N - 1];
+    el("text", {x: xx, y: H - 10, "text-anchor": "middle", "font-size": 11, fill: muted, "font-family": "IBM Plex Mono, monospace"}).textContent = `+${h}h`;
+  }
+  const path = (arr, y) => arr.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  el("path", {d: path(D.p_pcs, yP), fill: "none", stroke: css("--discharge"), "stroke-width": 1.6, opacity: .9});
+  el("path", {d: path(D.soc, ySoc) + `L${x(N-1)},${ySoc(0)}L${x(0)},${ySoc(0)}Z`, fill: css("--accent"), opacity: .10});
+  el("path", {d: path(D.soc, ySoc), fill: "none", stroke: css("--accent"), "stroke-width": 2.2});
+  el("line", {id: "cursor", x1: L, x2: L, y1: T, y2: H - B, stroke: css("--fg"), "stroke-width": 1.2});
+  el("circle", {id: "dot", r: 4, fill: css("--accent"), cx: L, cy: ySoc(D.soc[0])});
+}
+
+const $ = id => document.getElementById(id);
+function render(i) {
+  i = Math.max(0, Math.min(N - 1, i));
+  $("cursor").setAttribute("x1", x(i)); $("cursor").setAttribute("x2", x(i));
+  $("dot").setAttribute("cx", x(i)); $("dot").setAttribute("cy", ySoc(D.soc[i]));
+  $("v-soc").innerHTML = `${D.soc[i].toFixed(1)} <small>%</small>`;
+  const b = $("b-soc"); b.style.width = D.soc[i] + "%";
+  const [name, col] = STATES[D.state[i]] || ["?", "--muted"];
+  $("v-state").textContent = name; $("v-state").style.setProperty("--sc", `var(${col})`);
+  b.style.background = `var(${D.state[i] === 2 ? "--charge" : D.state[i] === 3 ? "--discharge" : "--muted"})`;
+  $("v-p").innerHTML = `${D.p_pcs[i] >= 0 ? "+" : ""}${D.p_pcs[i].toFixed(0)} <small>kW</small>`;
+  $("v-poi").innerHTML = `${D.p_poi[i].toFixed(0)} <small>/</small> ${D.p_aux[i].toFixed(1)} <small>kW</small>`;
+  $("v-t").innerHTML = `${D.t_cell[i].toFixed(1)} <small>/</small> ${D.t_cont[i].toFixed(1)} <small>°C</small>`;
+  let a = 0; for (let k = 0; k <= i; k++) a += D.avail[k];
+  $("v-av").innerHTML = `${(100 * a / (i + 1)).toFixed(2)} <small>%</small>`;
+  const simS = D.t[i] * 60;
+  $("clock").textContent = `sim +${Math.floor(simS / 3600)}h${String(Math.floor(simS % 3600 / 60)).padStart(2, "0")}  ·  real ${Math.round(D.t[i])} s`;
+  const ev = D.events.filter(e => e.t <= D.t[i]).slice().reverse();
+  $("journal").innerHTML = ev.length ? ev.map(e => `<div class="${e.state}"><span>+${Math.round(e.t)}s</span><span>${e.state}</span><span>${e.severity}</span><span>${e.id}</span></div>`).join("")
+    : `<div class="empty">No alarms yet in the replay.</div>`;
+  $("scrub").value = Math.round(100 * i / (N - 1));
+}
+
+let idx = 0, playing = !matchMedia("(prefers-reduced-motion: reduce)").matches, timer;
+function tick() { if (!playing) return; idx = idx >= N - 1 ? 0 : idx + 1; render(idx); }
+function setPlay(p) { playing = p; $("play").textContent = p ? "Pause" : "Play"; }
+$("play").addEventListener("click", () => setPlay(!playing));
+$("scrub").addEventListener("input", e => { setPlay(false); idx = Math.round(e.target.value / 100 * (N - 1)); render(idx); });
+drawStatic();
+idx = playing ? 0 : Math.floor(N * 0.45);
+render(idx); setPlay(playing);
+timer = setInterval(tick, 180);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { drawStatic(); render(idx); });
+new MutationObserver(() => { drawStatic(); render(idx); }).observe(document.documentElement, {attributes: true, attributeFilter: ["data-theme"]});
+</script>

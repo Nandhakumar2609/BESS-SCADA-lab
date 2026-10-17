@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest>=8
+Jinja2>=3.1
+ansible-core>=2.16
+matplotlib>=3.8

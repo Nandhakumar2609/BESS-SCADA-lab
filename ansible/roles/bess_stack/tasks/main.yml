@@ -1,0 +1,79 @@
+---
+- name: Install directory
+  ansible.builtin.file:
+    path: "{{ bess_install_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy the project (code, config, compose files, dashboards)
+  ansible.posix.synchronize:
+    src: "{{ playbook_dir }}/../"
+    dest: "{{ bess_install_dir }}/"
+    delete: false
+    rsync_opts: ["--exclude=.git", "--exclude=.env", "--exclude=reports/*", "--exclude=__pycache__",
+                 "--exclude=network/wireguard/server/*.conf", "--exclude=network/wireguard/keys",
+                 "--exclude=network/wireguard/clients", "--exclude=backups"]
+
+- name: Secrets directory
+  ansible.builtin.file:
+    path: /etc/bess-lab
+    state: directory
+    mode: "0700"
+
+- name: Generate secrets once (never overwritten, never in git)
+  ansible.builtin.set_fact:
+    influx_admin_password: "{{ lookup('ansible.builtin.password', '/etc/bess-lab/influx_admin_password length=24 chars=ascii_letters,digits') }}"
+    influx_admin_token: "{{ lookup('ansible.builtin.password', '/etc/bess-lab/influx_admin_token length=48 chars=ascii_letters,digits') }}"
+    grafana_admin_password: "{{ lookup('ansible.builtin.password', '/etc/bess-lab/grafana_admin_password length=20 chars=ascii_letters,digits') }}"
+  no_log: true
+
+- name: Environment file
+  ansible.builtin.copy:
+    dest: "{{ bess_install_dir }}/.env"
+    mode: "0600"
+    content: |
+      # managed by Ansible
+      SIM_SPEED={{ bess_sim_speed }}
+      INFLUX_ADMIN_PASSWORD={{ influx_admin_password }}
+      INFLUX_ADMIN_TOKEN={{ influx_admin_token }}
+      GRAFANA_ADMIN_PASSWORD={{ grafana_admin_password }}
+      GRAFANA_ANONYMOUS_VIEWER=false
+  no_log: true
+
+- name: Render firewall policy from the zone model
+  ansible.builtin.template:
+    src: fw.nft.j2
+    dest: "{{ bess_install_dir }}/network/nftables/fw.nft"
+    mode: "0644"
+    validate: nft -c -f %s
+  register: fw_policy
+
+- name: Build and start the stack
+  ansible.builtin.command:
+    cmd: >-
+      docker compose -f {{ 'docker-compose.yml' if bess_compose_mode == 'segmented' else 'docker-compose.simple.yml' }}
+      up -d --build --remove-orphans
+    chdir: "{{ bess_install_dir }}"
+  register: compose_up
+  changed_when: "'Started' in compose_up.stderr or 'Recreated' in compose_up.stderr or 'Created' in compose_up.stderr"
+
+- name: Reload firewall policy in the running fw container
+  ansible.builtin.command:
+    cmd: docker compose exec -T fw nft -f /etc/nftables/fw.nft
+    chdir: "{{ bess_install_dir }}"
+  when: fw_policy.changed and bess_compose_mode == 'segmented'
+
+- name: Wait for the HMI
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/api/health
+    status_code: 200
+  register: hmi
+  retries: 30
+  delay: 5
+  until: hmi.status == 200
+
+- name: Capture configuration baseline after deployment
+  ansible.builtin.command:
+    cmd: scripts/baseline.sh capture
+    chdir: "{{ bess_install_dir }}"
+  changed_when: true

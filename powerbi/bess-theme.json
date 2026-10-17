@@ -1,0 +1,26 @@
+{
+  "name": "BESS SCADA (ISA-101 style)",
+  "dataColors": ["#2F5D86", "#B8691E", "#2F7D4A", "#5B646D", "#C2362F", "#7FB0DC", "#B7791F", "#8E6BB0"],
+  "background": "#F4F5F6",
+  "foreground": "#1D2329",
+  "tableAccent": "#2F5D86",
+  "good": "#2F7D4A",
+  "neutral": "#B7791F",
+  "bad": "#C2362F",
+  "maximum": "#2F5D86",
+  "center": "#DCDFE2",
+  "minimum": "#F4F5F6",
+  "textClasses": {
+    "title": {"fontFace": "Segoe UI Semibold", "fontSize": 12, "color": "#1D2329"},
+    "label": {"fontFace": "Segoe UI", "fontSize": 10, "color": "#5B646D"},
+    "callout": {"fontFace": "Segoe UI Semibold", "fontSize": 26, "color": "#1D2329"}
+  },
+  "visualStyles": {
+    "*": {"*": {
+      "background": [{"show": true, "color": {"solid": {"color": "#FFFFFF"}}, "transparency": 0}],
+      "border": [{"show": true, "color": {"solid": {"color": "#C3C8CD"}}, "radius": 4}],
+      "dropShadow": [{"show": false}]
+    }},
+    "page": {"*": {"background": [{"color": {"solid": {"color": "#E6E8EA"}}, "transparency": 0}]}}
+  }
+}

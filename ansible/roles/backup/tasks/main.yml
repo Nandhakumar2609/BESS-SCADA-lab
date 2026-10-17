@@ -1,0 +1,73 @@
+---
+- name: Backup directory
+  ansible.builtin.file:
+    path: "{{ backup_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Backup service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/bess-backup.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=BESS lab backup (historian, dashboards, configuration)
+      After=docker.service
+      [Service]
+      Type=oneshot
+      Environment=BACKUP_DIR={{ backup_dir }} RETENTION_DAYS={{ backup_retention_days }}
+      WorkingDirectory={{ bess_install_dir }}
+      ExecStart={{ bess_install_dir }}/scripts/backup.sh
+  notify: Reload systemd
+
+- name: Daily backup timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/bess-backup.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Daily BESS lab backup
+      [Timer]
+      OnCalendar=*-*-* 02:30:00
+      RandomizedDelaySec=15m
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Daily configuration-drift check
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/bess-baseline-check.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=BESS lab configuration baseline drift check
+      [Service]
+      Type=oneshot
+      WorkingDirectory={{ bess_install_dir }}
+      ExecStart={{ bess_install_dir }}/scripts/baseline.sh check
+  notify: Reload systemd
+
+- name: Drift check timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/bess-baseline-check.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Daily configuration drift check
+      [Timer]
+      OnCalendar=*-*-* 06:00:00
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+
+- name: Flush handlers so the units exist
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [bess-backup.timer, bess-baseline-check.timer]

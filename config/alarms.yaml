@@ -1,0 +1,68 @@
+# Alarm configuration for the gateway alarm engine.
+#
+# type:
+#   high / low   analog limit on one point, with deadband and on-delay
+#   spread       difference of two points (a - b) above setpoint
+#   bitfield     one alarm per bit of a status word; bit names come from register_map.csv
+#   comms        device not answering for delay_s
+#   stale        heartbeat register frozen (device answers but its application is hung)
+# severity: critical | major | minor | warning
+# delay_s: condition must be true this long before the alarm raises (nuisance filtering)
+# deadband: how far back past the setpoint the value must go before the alarm clears
+
+defaults:
+  delay_s: 4
+  deadband: 0
+
+alarms:
+  # ---- Communications / watchdog -------------------------------------------------
+  - {id: COMMS_LOSS, device: "*", type: comms, delay_s: 6, severity: critical,
+     message: "Modbus communication lost"}
+  - {id: HEARTBEAT_STALE, device: "*", type: stale, point: heartbeat, severity: major,
+     message: "Device heartbeat frozen (stale data)", only_profiles: [pcs, bms, hvac]}
+
+  # ---- BMS ------------------------------------------------------------------------
+  - {id: BMS_SOC_HIGH, device: bms01, type: high, point: soc_pct, setpoint: 95, deadband: 2,
+     severity: warning, message: "State of charge high"}
+  - {id: BMS_SOC_LOW, device: bms01, type: low, point: soc_pct, setpoint: 10, deadband: 2,
+     severity: minor, message: "State of charge low"}
+  - {id: BMS_CELL_OV, device: bms01, type: high, point: max_cell_voltage_v, setpoint: 3.60, deadband: 0.03,
+     severity: critical, message: "Cell over-voltage"}
+  - {id: BMS_CELL_UV, device: bms01, type: low, point: min_cell_voltage_v, setpoint: 2.80, deadband: 0.05,
+     severity: critical, message: "Cell under-voltage"}
+  - {id: BMS_CELL_OT, device: bms01, type: high, point: max_cell_temp_c, setpoint: 45, deadband: 3,
+     severity: major, message: "Cell temperature high"}
+  - {id: BMS_CELL_IMBALANCE, device: bms01, type: spread, a: max_cell_voltage_v, b: min_cell_voltage_v,
+     setpoint: 0.060, deadband: 0.010, delay_s: 10, severity: minor, message: "Cell voltage imbalance"}
+  - {id: BMS_INSULATION_LOW, device: bms01, type: low, point: insulation_kohm, setpoint: 500, deadband: 50,
+     severity: major, message: "DC insulation resistance low"}
+  - {id: BMS_ALARM, device: bms01, type: bitfield, point: alarm_word, severity: critical, delay_s: 0,
+     bit_severity: {CELL_IMBALANCE: minor, INSULATION_LOW: major, CELL_UNDERTEMP: major},
+     message: "BMS alarm"}
+
+  # ---- PCS ------------------------------------------------------------------------
+  - {id: PCS_FAULT, device: pcs01, type: bitfield, point: fault_word, severity: critical, delay_s: 0,
+     bit_severity: {GRID_FREQUENCY: major, BMS_COMMS_LOST: major},
+     message: "PCS fault"}
+  - {id: PCS_WARNING, device: pcs01, type: bitfield, point: warning_word, severity: warning, delay_s: 2,
+     message: "PCS warning"}
+  - {id: PCS_IGBT_TEMP_HIGH, device: pcs01, type: high, point: igbt_temp_c, setpoint: 80, deadband: 5,
+     severity: major, message: "IGBT temperature high"}
+  - {id: GRID_FREQ_HIGH, device: pcs01, type: high, point: frequency_hz, setpoint: 50.5, deadband: 0.05,
+     severity: warning, message: "Grid frequency high"}
+  - {id: GRID_FREQ_LOW, device: pcs01, type: low, point: frequency_hz, setpoint: 49.5, deadband: 0.05,
+     severity: warning, message: "Grid frequency low"}
+
+  # ---- HVAC / container -----------------------------------------------------------
+  - {id: HVAC_FAULT, device: hvac01, type: bitfield, point: fault_word, severity: major, delay_s: 2,
+     message: "HVAC fault"}
+  - {id: CONTAINER_TEMP_HIGH, device: hvac01, type: high, point: container_temp_c, setpoint: 35, deadband: 2,
+     delay_s: 30, severity: major, message: "Container temperature high"}
+  - {id: CONTAINER_HUMIDITY_HIGH, device: hvac01, type: high, point: humidity_pct, setpoint: 80, deadband: 5,
+     delay_s: 60, severity: minor, message: "Container humidity high"}
+
+  # ---- Point of interconnection ---------------------------------------------------
+  - {id: POI_EXPORT_LIMIT, device: meter_poi, type: high, point: p_total_kw, setpoint: 1000, deadband: 20,
+     delay_s: 5, severity: warning, message: "POI export above grid-connection limit"}
+  - {id: POI_IMPORT_LIMIT, device: meter_poi, type: low, point: p_total_kw, setpoint: -1050, deadband: 20,
+     delay_s: 5, severity: warning, message: "POI import above grid-connection limit"}

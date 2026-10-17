@@ -1,0 +1,50 @@
+---
+# Docker Engine from Docker's official repository: the segmented compose file needs
+# Engine 28+ (per-network gw_priority), newer than some distribution packages.
+- name: Prerequisites
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, gnupg]
+    state: present
+
+- name: Docker apt repository (deb822, key pinned to the repo)
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
+    suites: ["{{ ansible_distribution_release }}"]
+    components: [stable]
+    architectures: ["{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}.get(ansible_architecture, 'amd64') }}"]
+    signed_by: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    state: present
+
+- name: Docker engine, buildx and compose plugin
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+    state: present
+    update_cache: true
+
+- name: Docker daemon settings (log rotation, live restore, no userland proxy)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {"max-size": "10m", "max-file": "5"},
+        "userland-proxy": false,
+        "live-restore": true
+      }
+  register: docker_daemon
+
+- name: Docker service
+  ansible.builtin.service:
+    name: docker
+    state: "{{ 'restarted' if docker_daemon.changed else 'started' }}"
+    enabled: true
+
+- name: WireGuard kernel module for the firewall container
+  community.general.modprobe:
+    name: wireguard
+    state: present
+    persistent: present
+  failed_when: false

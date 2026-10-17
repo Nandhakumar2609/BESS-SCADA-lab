@@ -1,0 +1,24 @@
+#!/usr/sbin/nft -f
+# managed by Ansible - host firewall (INPUT only).
+# Deliberately no "flush ruleset": Docker keeps its own tables for container networking.
+{# always keep the address Ansible is connecting from, so a run can never lock itself out #}
+{% set mgmt = ssh_allow_from + ([ansible_env.SSH_CLIENT.split()[0]] if (ansible_env is defined and ansible_env.SSH_CLIENT is defined) else []) %}
+table inet bess_host
+delete table inet bess_host
+
+table inet bess_host {
+    chain input {
+        type filter hook input priority filter; policy drop;
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+        ip saddr { {{ mgmt | unique | join(", ") }} } tcp dport {{ ssh_port }} accept comment "SSH from management"
+        tcp dport 3000 accept comment "HMI (published by the fw container)"
+        udp dport {{ vpn.port }} accept comment "WireGuard (published by the fw container)"
+        icmp type echo-request limit rate 5/second accept
+        iifname "br-*" accept comment "container networks reaching host services (DNS etc.)"
+        iifname "docker0" accept
+        limit rate 5/second log prefix "HOST-IN-DROP " level info
+        counter drop
+    }
+}

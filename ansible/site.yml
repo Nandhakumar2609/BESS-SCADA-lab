@@ -1,0 +1,25 @@
+---
+# Deploy the complete BESS SCADA lab onto a fresh Ubuntu 22.04/24.04 or Debian 12 host.
+#   cd ansible
+#   ansible-playbook site.yml                     # everything
+#   ansible-playbook site.yml --tags hardening    # only re-apply hardening
+#   ansible-playbook site.yml --check --diff      # dry run: show configuration drift
+- name: BESS SCADA lab host
+  hosts: bess_lab
+  become: true
+  roles:
+    - {role: common, tags: [common]}
+    - {role: hardening, tags: [hardening]}
+    - {role: docker, tags: [docker]}
+    - {role: bess_stack, tags: [stack]}
+    - {role: wireguard, tags: [vpn], when: bess_compose_mode == 'segmented'}
+    - {role: backup, tags: [backup]}
+  post_tasks:
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "HMI (Grafana):   http://{{ ansible_default_ipv4.address | default('localhost') }}:3000"
+          - "Mode:            {{ bess_compose_mode }}"
+          - "VPN client cfgs: /etc/bess-lab/wireguard/client-*.conf"
+          - "FAT:             cd {{ bess_install_dir }} && make fat"
+      tags: [always]

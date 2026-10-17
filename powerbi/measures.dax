@@ -1,0 +1,58 @@
+// ===================== BESS SCADA - DAX measures =====================
+// Paste each block as a New measure in the _Measures table.
+
+// ---- State ----
+SoC Latest % =                                   // format: 0.0
+VAR lastTs = MAX ( tblTelemetry[Timestamp] )
+RETURN CALCULATE ( MAX ( tblTelemetry[SoC_pct] ), tblTelemetry[Timestamp] = lastTs )
+
+Availability % =                                 // format: 0.00 ; share of minutes available
+DIVIDE ( SUM ( tblTelemetry[Available] ), COUNTROWS ( tblTelemetry ) ) * 100
+
+Minutes in State =
+COUNTROWS ( tblTelemetry )
+
+Fault Minutes =
+CALCULATE ( COUNTROWS ( tblTelemetry ), tblTelemetry[PCS_State] = "FAULT" )
+
+// ---- Energy ----
+Energy Charged MWh =                             // format: 0.00
+SUM ( tblTelemetry[Energy_Charged_kWh] ) / 1000
+
+Energy Discharged MWh =                          // format: 0.00
+SUM ( tblTelemetry[Energy_Discharged_kWh] ) / 1000
+
+POI Export MWh =
+SUM ( tblTelemetry[POI_Export_kWh] ) / 1000
+
+POI Import MWh =
+SUM ( tblTelemetry[POI_Import_kWh] ) / 1000
+
+Auxiliary Energy kWh =                           // HVAC + controls consumption
+SUM ( tblTelemetry[AUX_Energy_kWh] )
+
+Round-trip Efficiency % =                        // AC side, PCS terminals; format: 0.0
+DIVIDE ( [Energy Discharged MWh], [Energy Charged MWh] ) * 100
+
+Site Efficiency incl. Aux % =                    // at the grid connection point; format: 0.0
+DIVIDE ( [POI Export MWh], [POI Import MWh] ) * 100
+
+Equivalent Cycles =                              // 2 MWh usable capacity; format: 0.00
+DIVIDE ( [Energy Discharged MWh], 2 )
+
+// ---- Battery ----
+Max Cell Spread mV =                             // worst imbalance in the selection; format: 0
+MAXX ( tblTelemetry, ( tblTelemetry[Cell_Vmax_V] - tblTelemetry[Cell_Vmin_V] ) * 1000 )
+
+Max Cell Temp C =
+MAX ( tblTelemetry[Cell_Tmax_C] )
+
+// ---- Alarms ----
+Alarm Count =
+COUNTROWS ( tblAlarms )
+
+Critical Alarms =
+CALCULATE ( COUNTROWS ( tblAlarms ), tblAlarms[Severity] = "critical" )
+
+MTTR min =                                       // mean time to restore; format: 0.0
+AVERAGE ( tblAlarms[Duration_min] )

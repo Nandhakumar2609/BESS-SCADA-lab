@@ -1,0 +1,56 @@
+# Site definition: which device instances exist, where they live and how to poll them.
+# The register layout of each device comes from register_map.csv (column "profile").
+site:
+  id: BESS01
+  name: "BESS Lab Site 01 - 1 MW / 2 MWh"
+  rated_power_kw: 1000
+  capacity_kwh: 2000
+
+devices:
+  - name: pcs01
+    profile: pcs
+    host: 10.10.10.11
+    port: 502
+    unit_id: 1
+  - name: bms01
+    profile: bms
+    host: 10.10.10.12
+    port: 502
+    unit_id: 1
+  - name: hvac01
+    profile: hvac
+    host: 10.10.10.13
+    port: 502
+    unit_id: 1
+  # Two meters behind one Modbus TCP address (like an RS-485 gateway): unit 1 and unit 2
+  - name: meter_poi
+    profile: meter
+    host: 10.10.10.14
+    port: 502
+    unit_id: 1
+  - name: meter_aux
+    profile: meter
+    host: 10.10.10.14
+    port: 502
+    unit_id: 2
+
+polling:
+  interval_s: 2.0        # scan cycle
+  timeout_s: 1.0         # per Modbus request
+  retries: 1
+  max_block_registers: 100   # largest single read (Modbus limit is 125)
+  max_gap: 4                 # merge points into one read if the gap is <= this many registers
+  stale_heartbeat_s: 10      # heartbeat not changing for this long => stale data
+
+dispatch:
+  enabled: true
+  mode: cycle            # cycle = charge to soc_high, discharge to soc_low (demo / capacity test)
+  power_kw: 800
+  soc_high: 90
+  soc_low: 20
+
+historian:
+  url: http://10.10.30.10:8086
+  org: bess-lab
+  bucket: bess
+  # token comes from the INFLUX_TOKEN environment variable

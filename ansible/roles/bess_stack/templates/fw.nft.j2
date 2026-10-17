@@ -1,0 +1,105 @@
+#!/usr/sbin/nft -f
+# ==================================================================================
+# BESS lab OT edge firewall - generated from ansible/group_vars/all.yml, do not edit.
+#
+# Zones (IEC 62443-3-2):
+{% for name, z in zones.items() %}
+#   {{ "%-8s"|format(name) }} vlan{{ z.vlan }}  {{ "%-15s"|format(z.subnet) }} {{ z.description }}
+{% endfor %}
+#   vpn      wg0     {{ "%-15s"|format(vpn.subnet) }} WireGuard remote access
+#
+# Conduits (everything else is dropped and logged):
+#   C1 control -> field   gateway -> PCS/BMS/HVAC/meters   tcp/502 Modbus, icmp echo
+#   C2 control -> dmz     gateway -> historian             tcp/8086 InfluxDB write API
+#   C3 wan/vpn -> dmz     users   -> HMI (Grafana)         tcp/3000 (wan via DNAT)
+#   C4 vpn     -> dmz     engineers -> historian           tcp/8086
+#   C5 vpn     -> control engineers -> control zone        tcp/22
+# Field and DMZ zones can never open connections towards higher-trust zones.
+# ==================================================================================
+
+define FIELD_NET = {{ zones.field.subnet }}
+define CTRL_NET  = {{ zones.control.subnet }}
+define DMZ_NET   = {{ zones.dmz.subnet }}
+define VPN_NET   = {{ vpn.subnet }}
+define GATEWAY   = {{ hosts_ip.gateway }}
+define HISTORIAN = {{ hosts_ip.historian }}
+define HMI       = {{ hosts_ip.hmi }}
+
+# idempotent reload: create-then-delete our own table only (never "flush ruleset",
+# which would also wipe Docker's or the host's rules)
+table inet bess_fw
+delete table inet bess_fw
+
+table inet bess_fw {
+    set field_devices {
+        type ipv4_addr
+        elements = { {{ hosts_ip.field_devices | join(", ") }} }
+    }
+    set vpn_engineers {
+        type ipv4_addr
+        elements = { {{ vpn.peers | selectattr("role", "equalto", "engineer") | map(attribute="ip") | join(", ") }} }
+    }
+
+    # ---------------------------------------------------------------- anti-spoofing
+    chain prerouting_filter {
+        type filter hook prerouting priority raw; policy accept;
+        # reverse-path filter: drop packets whose source is not routable back via the arrival interface
+        fib saddr . iif oif missing counter log prefix "FW-SPOOF " group 1 drop
+    }
+
+    # ---------------------------------------------------------------- to the firewall itself
+    chain input {
+        type filter hook input priority filter; policy drop;
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid counter drop
+        iifname "wan" udp dport {{ vpn.port }} counter accept comment "WireGuard"
+        iifname "wg0" ip saddr @vpn_engineers tcp dport 22 counter accept comment "SSH from engineers"
+        iifname { "vlan20", "wg0" } icmp type echo-request limit rate 5/second accept
+        limit rate 5/second burst 10 packets log prefix "FW-IN-DROP " group 1
+        counter drop
+    }
+
+    # ---------------------------------------------------------------- between zones
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+        ct state established,related accept
+        ct state invalid counter drop
+
+        # C1 SCADA polling: only the gateway, only Modbus/TCP, only to known devices
+        iifname "vlan20" oifname "vlan10" ip saddr $GATEWAY ip daddr @field_devices tcp dport 502 counter accept comment "C1 modbus"
+        iifname "vlan20" oifname "vlan10" ip saddr $GATEWAY ip daddr @field_devices icmp type echo-request limit rate 2/second accept comment "C1 ping"
+
+        # C2 historian writes
+        iifname "vlan20" oifname "vlan30" ip saddr $GATEWAY ip daddr $HISTORIAN tcp dport 8086 counter accept comment "C2 historian"
+
+        # C3 HMI access (wan arrives here after DNAT)
+        iifname { "wan", "wg0" } oifname "vlan30" ip daddr $HMI tcp dport 3000 counter accept comment "C3 hmi"
+
+        # C4 / C5 engineering access over VPN
+        iifname "wg0" oifname "vlan30" ip saddr @vpn_engineers ip daddr $HISTORIAN tcp dport 8086 counter accept comment "C4 eng historian"
+        iifname "wg0" oifname "vlan20" ip saddr @vpn_engineers tcp dport 22 counter accept comment "C5 eng ssh"
+
+        # everything else: log (rate-limited) and drop
+        limit rate 10/second burst 20 packets log prefix "FW-FWD-DROP " group 1
+        counter drop
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+
+    # ---------------------------------------------------------------- NAT
+    chain prerouting_nat {
+        type nat hook prerouting priority dstnat; policy accept;
+        # publish the HMI on the uplink (port forward)
+        iifname "wan" tcp dport 3000 counter dnat ip to $HMI:3000
+    }
+    chain postrouting_nat {
+        type nat hook postrouting priority srcnat; policy accept;
+        # zone SNAT: lower-trust zones only ever see the firewall address,
+        # so DMZ and field hosts need no routes into the control or VPN networks
+        oifname "vlan30" counter masquerade
+        oifname "vlan10" counter masquerade
+    }
+}

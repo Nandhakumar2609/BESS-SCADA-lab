@@ -1,0 +1,166 @@
+# ==================================================================================
+# BESS SCADA lab - segmented OT network (default).
+#   field (VLAN10) <-> fw <-> control (VLAN20) <-> fw <-> dmz (VLAN30) <-> fw <-> wan
+# Every zone is its own Docker bridge; the only path between zones is the "fw" container
+# (nftables + WireGuard). Requires a Linux host (or Docker Desktop) and Docker Engine 28+.
+# For a quick flat demo use docker-compose.simple.yml instead (make demo).
+# ==================================================================================
+name: bess-lab
+
+x-app: &app
+  build: {context: ., dockerfile: docker/app.Dockerfile}
+  image: bess-lab/app:latest
+  restart: unless-stopped
+  cap_add: [NET_ADMIN]                 # entrypoint sets routes/aliases, then drops to uid 10001
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: [/tmp]
+  logging: {driver: json-file, options: {max-size: "10m", max-file: "5"}}
+
+networks:
+  field:    # VLAN 10 - Level 0/1
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-vlan10
+      com.docker.network.bridge.enable_ip_masquerade: "false"   # no internet egress for OT
+    ipam: {config: [{subnet: 10.10.10.0/24, gateway: 10.10.10.1, ip_range: 10.10.10.192/27}]}
+  control:  # VLAN 20 - Level 2
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-vlan20
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+    ipam: {config: [{subnet: 10.10.20.0/24, gateway: 10.10.20.1, ip_range: 10.10.20.192/27}]}
+  dmz:      # VLAN 30 - Level 3.5
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-vlan30
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+    ipam: {config: [{subnet: 10.10.30.0/24, gateway: 10.10.30.1, ip_range: 10.10.30.192/27}]}
+  wan:      # uplink - only the firewall is attached
+    driver: bridge
+    driver_opts: {com.docker.network.bridge.name: br-wan}
+    ipam: {config: [{subnet: 172.30.0.0/24, gateway: 172.30.0.1}]}
+
+volumes:
+  influx-data:
+  influx-config:
+  influx-secrets:
+  grafana-data:
+  fw-logs:
+
+services:
+  # -------------------------------------------------------------- OT edge firewall
+  fw:
+    build: {context: ., dockerfile: docker/fw.Dockerfile}
+    image: bess-lab/fw:latest
+    hostname: fw
+    restart: unless-stopped
+    cap_add: [NET_ADMIN, NET_RAW]
+    sysctls:
+      net.ipv4.ip_forward: "1"
+      net.ipv4.conf.all.rp_filter: "0"         # done in nftables (fib) instead
+      net.ipv4.conf.all.send_redirects: "0"
+      net.ipv4.conf.all.accept_redirects: "0"
+    environment:
+      FW_IFMAP: "10.10.10.254=vlan10 10.10.20.254=vlan20 10.10.30.254=vlan30 172.30.0.254=wan"
+      WAN_GW: 172.30.0.1
+    volumes:
+      - ./network/nftables/fw.nft:/etc/nftables/fw.nft:ro
+      - ./network/wireguard/server:/etc/wireguard:ro   # server config only, never client keys
+      - fw-logs:/var/log/fw
+    ports:
+      - "3000:3000/tcp"                        # HMI, forwarded to Grafana by nftables DNAT
+      - "51820:51820/udp"                      # WireGuard
+    networks:
+      wan:     {ipv4_address: 172.30.0.254, gw_priority: 100}
+      field:   {ipv4_address: 10.10.10.254}
+      control: {ipv4_address: 10.10.20.254}
+      dmz:     {ipv4_address: 10.10.30.254}
+
+  # -------------------------------------------------------------- Level 0/1: field devices
+  field-sim:
+    <<: *app
+    hostname: field-sim
+    command: ["python", "-m", "bess_lab.sim.server"]
+    environment:
+      SIM_SPEED: "${SIM_SPEED:-20}"
+      NET_ALIASES: "10.10.10.11/24 10.10.10.12/24 10.10.10.13/24 10.10.10.14/24"
+      NET_ROUTES: "default via 10.10.10.254"
+    sysctls: {net.ipv4.ip_unprivileged_port_start: "0"}   # bind :502 without root
+    networks:
+      field: {ipv4_address: 10.10.10.10}
+
+  # -------------------------------------------------------------- Level 2: SCADA gateway
+  gateway:
+    <<: *app
+    hostname: gateway
+    command: ["python", "-m", "bess_lab.gateway.main"]
+    environment:
+      NET_ROUTES: "default via 10.10.20.254"
+      INFLUX_TOKEN_FILE: /secrets/gateway.token          # write-only token
+      INFLUX_READ_TOKEN_FILE: /secrets/grafana.token     # read-only, used by the FAT runner
+      FAT_REPORT_DIR: /app/reports
+      INFLUX_URL: http://10.10.30.10:8086
+    volumes:
+      - influx-secrets:/secrets:ro
+      - ./reports:/app/reports
+    depends_on:
+      fw: {condition: service_started}
+      field-sim: {condition: service_started}
+      influxdb: {condition: service_healthy}
+    networks:
+      control: {ipv4_address: 10.10.20.10}
+
+  # -------------------------------------------------------------- Level 3.5: OT DMZ
+  influxdb:
+    image: influxdb:${INFLUXDB_VERSION:-2.7}
+    hostname: historian
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /secrets && chown 1000:1000 /secrets && exec /entrypoint.sh influxd"]
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_ADMIN_PASSWORD:?set in .env}
+      DOCKER_INFLUXDB_INIT_ORG: bess-lab
+      DOCKER_INFLUXDB_INIT_BUCKET: bess
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_ADMIN_TOKEN:?set in .env}
+      INFLUXD_REPORTING_DISABLED: "true"
+    volumes:
+      - influx-data:/var/lib/influxdb2
+      - influx-config:/etc/influxdb2
+      - influx-secrets:/secrets
+      - ./docker/influx-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "influx ping && test -s /secrets/gateway.token && test -s /secrets/grafana.token"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      dmz: {ipv4_address: 10.10.30.10}
+
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-11.4.0}
+    hostname: hmi
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set in .env}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_VIEWER:-false}   # true = read-only kiosk for demos
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/bess-overview.json
+      INFLUX_URL: http://10.10.30.10:8086
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - influx-secrets:/secrets:ro
+    depends_on:
+      influxdb: {condition: service_healthy}
+    networks:
+      dmz: {ipv4_address: 10.10.30.11}

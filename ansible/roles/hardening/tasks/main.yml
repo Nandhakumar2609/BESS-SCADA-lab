@@ -1,0 +1,91 @@
+---
+# Host hardening mapped to IEC 62443-3-3 system requirements (see docs/iec62443.md).
+
+- name: "SR 1.1 / 1.7: SSH hardening (key-only, no root, strong crypto)"
+  ansible.builtin.template:
+    src: sshd-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-bess-hardening.conf
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd
+
+- name: "SR 1.12: Login banner"
+  ansible.builtin.copy:
+    content: "{{ login_banner }}"
+    dest: "{{ item }}"
+    mode: "0644"
+  loop: [/etc/issue.net, /etc/motd]
+
+- name: "SR 7.6: Kernel network hardening"
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/90-bess-hardening.conf
+    mode: "0644"
+    content: |
+      # managed by Ansible
+      net.ipv4.conf.all.accept_redirects = 0
+      net.ipv4.conf.default.accept_redirects = 0
+      net.ipv4.conf.all.send_redirects = 0
+      net.ipv4.conf.all.accept_source_route = 0
+      net.ipv4.conf.all.log_martians = 1
+      net.ipv4.tcp_syncookies = 1
+      net.ipv4.icmp_echo_ignore_broadcasts = 1
+      kernel.dmesg_restrict = 1
+      kernel.kptr_restrict = 2
+      kernel.unprivileged_bpf_disabled = 1
+      fs.protected_symlinks = 1
+      fs.protected_hardlinks = 1
+  notify: Apply sysctl
+
+- name: Journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: "SR 2.8 / 6.1: Persistent, size-limited journal"
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/bess.conf
+    mode: "0644"
+    content: |
+      [Journal]
+      Storage=persistent
+      SystemMaxUse={{ journald_max_use }}
+      ForwardToSyslog=no
+  notify: Restart journald
+
+- name: "SR 2.8: Audit rules - who changed security-relevant configuration"
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/bess.rules
+    mode: "0640"
+    content: |
+      -w /etc/nftables.conf -p wa -k firewall_change
+      -w {{ bess_install_dir }}/network -p wa -k bess_network_change
+      -w {{ bess_install_dir }}/config -p wa -k bess_config_change
+      -w /etc/bess-lab -p wa -k bess_secrets_change
+      -w /etc/ssh/sshd_config.d -p wa -k ssh_change
+      -w /etc/sudoers -p wa -k priv_change
+      -w /usr/bin/docker -p x -k docker_exec
+      -a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=unset -k root_cmd
+  notify: Load audit rules
+
+- name: "SR 5.1: Host firewall (only our own table - Docker's rules are left alone)"
+  ansible.builtin.template:
+    src: host-nftables.conf.j2
+    dest: /etc/nftables.conf
+    mode: "0644"
+    validate: nft -c -f %s
+  notify: Reload host firewall
+
+- name: Host firewall service
+  ansible.builtin.service:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Disable unused services
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: [avahi-daemon, cups, bluetooth]
+  failed_when: false

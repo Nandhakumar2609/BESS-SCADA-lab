@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+reports/*
+!reports/.gitkeep
+backups/
+baselines/
+network/wireguard/keys/
+network/wireguard/clients/
+network/wireguard/server/*.conf

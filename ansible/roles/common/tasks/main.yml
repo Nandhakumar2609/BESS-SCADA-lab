@@ -1,0 +1,38 @@
+---
+- name: Base packages
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, git, make, python3, python3-venv, chrony, nftables, auditd,
+            iproute2, tcpdump, jq, rsync, unattended-upgrades]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Time synchronisation (timestamps in logs and historian must be trustworthy)
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
+
+- name: Automatic security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Admin users with SSH keys only
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    groups: [sudo]
+    append: true
+    shell: /bin/bash
+  loop: "{{ admin_users }}"
+
+- name: Authorized keys
+  ansible.posix.authorized_key:
+    user: "{{ item.name }}"
+    key: "{{ item.pubkey }}"
+    exclusive: true
+  loop: "{{ admin_users }}"
+  when: admin_users | length > 0

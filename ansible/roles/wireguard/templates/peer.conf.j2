@@ -1,0 +1,16 @@
+# WireGuard client config for "{{ peer.name }}" ({{ peer.role }}) - import into the WireGuard app.
+[Interface]
+Address = {{ peer.ip }}/32
+PrivateKey = {{ wg_keys[peer.name].private }}
+
+[Peer]
+PublicKey = {{ wg_keys['fw'].public }}
+PresharedKey = {{ wg_keys[peer.name].psk }}
+Endpoint = {{ vpn.endpoint }}:{{ vpn.port }}
+# split tunnel: only the OT networks this role may reach go through the VPN
+{% if peer.role == 'engineer' %}
+AllowedIPs = {{ hosts_ip.hmi }}/32, {{ hosts_ip.historian }}/32, {{ zones.control.subnet }}, {{ vpn.fw_ip }}/32
+{% else %}
+AllowedIPs = {{ hosts_ip.hmi }}/32
+{% endif %}
+PersistentKeepalive = 25

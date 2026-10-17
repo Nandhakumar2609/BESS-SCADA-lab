@@ -1,0 +1,64 @@
+---
+# ==================================================================================
+# Single source of truth for the lab network. Used by Ansible AND by
+# tools/render_configs.py (which renders network/nftables/fw.nft for non-Ansible users).
+# ==================================================================================
+bess_site_id: BESS01
+bess_install_dir: /opt/bess-lab
+bess_compose_mode: segmented        # segmented (zones + firewall) | simple (flat demo network)
+bess_sim_speed: 20                  # simulator time acceleration
+
+# ---- Zones (IEC 62443-3-2 zone model, each one a VLAN / Docker network) ----------
+zones:
+  field:
+    vlan: 10
+    subnet: 10.10.10.0/24
+    fw_ip: 10.10.10.254
+    description: "Level 0-1  OT field devices (PCS, BMS, HVAC, meters)"
+  control:
+    vlan: 20
+    subnet: 10.10.20.0/24
+    fw_ip: 10.10.20.254
+    description: "Level 2    SCADA gateway / site controller"
+  dmz:
+    vlan: 30
+    subnet: 10.10.30.0/24
+    fw_ip: 10.10.30.254
+    description: "Level 3.5  OT DMZ: historian + HMI dashboards"
+  wan:
+    vlan: 99
+    subnet: 172.30.0.0/24
+    fw_ip: 172.30.0.254
+    gateway: 172.30.0.1
+    description: "External / corporate / internet uplink"
+
+vpn:
+  subnet: 10.99.0.0/24
+  fw_ip: 10.99.0.1
+  port: 51820
+  endpoint: "{{ ansible_default_ipv4.address | default('YOUR.PUBLIC.IP') }}"
+  peers:
+    - name: engineer
+      ip: 10.99.0.10
+      role: engineer      # HMI + historian API + SSH to control zone
+    - name: viewer
+      ip: 10.99.0.20
+      role: viewer        # HMI (Grafana) only
+
+hosts_ip:
+  simulator: 10.10.10.10
+  field_devices: [10.10.10.11, 10.10.10.12, 10.10.10.13, 10.10.10.14]
+  gateway: 10.10.20.10
+  historian: 10.10.30.10
+  hmi: 10.10.30.11
+
+# ---- Host hardening ---------------------------------------------------------------
+admin_users: []                      # e.g. [{name: alice, pubkey: "ssh-ed25519 AAAA..."}]
+ssh_port: 22
+ssh_allow_from: [10.99.0.0/24, 192.168.0.0/16]   # management sources allowed to SSH the host
+login_banner: |
+  AUTHORIZED ACCESS ONLY. This system is part of an industrial control system.
+  All activity is logged and monitored. Disconnect now if you are not authorized.
+journald_max_use: 500M
+backup_dir: /var/backups/bess-lab
+backup_retention_days: 14

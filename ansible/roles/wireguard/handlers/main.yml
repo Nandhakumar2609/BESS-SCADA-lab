@@ -1,0 +1,7 @@
+---
+- name: Restart firewall container
+  ansible.builtin.command:
+    cmd: docker compose restart fw
+    chdir: "{{ bess_install_dir }}"
+  become: true
+  when: bess_compose_mode == 'segmented'

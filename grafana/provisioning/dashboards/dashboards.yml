@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: bess-lab
+    folder: BESS Lab
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false        # dashboards are configuration-managed (baseline in git)
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
