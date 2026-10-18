@@ -37,6 +37,8 @@ make demo                 # flat demo network, works on any Docker host
 open http://localhost:3000   # Grafana (anonymous read-only viewer is enabled in demo mode)
 ```
 
+**Windows:** install Docker Desktop, then double-click `start-demo.bat` - Grafana opens in the browser.
+
 Full segmented OT network with the firewall and VPN (Linux host, Docker Engine 28+):
 
 ```bash
